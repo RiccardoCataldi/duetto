@@ -147,11 +147,11 @@ The session tests need torch, so run them there: `python -m unittest tests.test_
 **On the PC, once** (Python 3.11+, the repo in `~/Ai-Duet`, `ssh pc` working from the laptop with a key):
 ```bash
 cd ~/Ai-Duet && python3 -m venv .venv && . .venv/bin/activate
-pip install torch safetensors numpy                               # torch with CUDA
+pip install torch safetensors numpy                               # torch with CUDA (driver CUDA 12.8: --index-url https://download.pytorch.org/whl/cu128)
 pip install git+https://github.com/EleutherAI/aria-utils.git
 git clone https://github.com/EleutherAI/aria ~/aria && pip install --no-deps -e ~/aria   # --no-deps: mlx is for Macs
 mkdir -p ~/models && wget -O ~/models/aria-medium-gen.safetensors \
-  https://huggingface.co/loubb/aria-medium-gen/resolve/main/model.safetensors
+  https://huggingface.co/loubb/aria-medium-base/resolve/main/model-gen.safetensors
 ```
 
 **Every time:** from the laptop,
