@@ -51,8 +51,9 @@ def dynamics(pitch, hand, together, line, level, accompanying, rng=random):
 
 class Duo:
     """
-    You and the model play at the same time. Every key you press goes to the model straight away; it sends back
-    its own line a little ahead of time, and redoes the part that has not sounded yet whenever you play.
+    You and the model play at the same time. Every key you press goes to the model straight away, and how long it
+    lasted once it stops sounding; it sends back its own line a little ahead of time, and redoes the part that has
+    not sounded yet whenever you play.
     `send` takes one protocol line (see music_transformer/server.py); `started` is when the connection opened.
     """
 
@@ -73,39 +74,45 @@ class Duo:
         self.pending = []              # the model's notes not started yet: (onset, duration, pitch, hand, velocity)
         self.sounding = {}             # pitch -> (onset, offset, velocity) of the model's notes
         self.line = deque(maxlen=CONTOUR_NOTES)   # its right hand's last pitches
+        self.late = 0                  # the model's notes that came later than LATE_S, skipped
 
     def note_on(self, pitch, velocity, now):
         with self.lock:
-            self._sounded(pitch, now)   # a key the pedal still holds, struck again
+            lines = self._sounded(pitch, now)   # a key the pedal still holds, struck again
             self.held[pitch] = (now, velocity)
             self.level += LEVEL * (velocity - self.level)
             self.played_at = now
             guess = statistics.median(self.durations) if self.durations else GUESS_S
-        self.send(f"on {now - self.started:.3f} {guess:.3f} {pitch} {velocity}\n")
+        for line in lines + [f"on {now - self.started:.3f} {guess:.3f} {pitch} {velocity}\n"]:
+            self.send(line)
 
     def note_off(self, pitch, now):
         with self.lock:
             if pitch not in self.held:
                 return
             self.pedaled[pitch] = self.held.pop(pitch)
-            if not self.pedal:
-                self._sounded(pitch, now)
+            lines = [] if self.pedal else self._sounded(pitch, now)
+        for line in lines:
+            self.send(line)
 
     def sustain(self, value, now):
         """Your sustain pedal: while it is down, the keys you let go ring on until it comes up."""
         with self.lock:
             self.pedalings.append((now, value))
             self.pedal = value >= 64
-            if not self.pedal:
-                for pitch in list(self.pedaled):
-                    self._sounded(pitch, now)
+            lines = [] if self.pedal else [line for pitch in list(self.pedaled) for line in self._sounded(pitch, now)]
+        for line in lines:
+            self.send(line)
 
     def _sounded(self, pitch, now):
-        """Your note on `pitch`, held by the pedal, has stopped sounding at `now`."""
-        if pitch in self.pedaled:
-            onset, velocity = self.pedaled.pop(pitch)
-            self.durations.append(now - onset)   # how long your notes sound, the pedal's ring and all
-            self.notes.append((onset, now, pitch, velocity, False))
+        """Your note on `pitch`, held by the pedal, has stopped sounding at `now`: the lines that tell the model how
+        long it lasted (the server guessed when you pressed it)."""
+        if pitch not in self.pedaled:
+            return []
+        onset, velocity = self.pedaled.pop(pitch)
+        self.durations.append(now - onset)   # how long your notes sound, the pedal's ring and all
+        self.notes.append((onset, now, pitch, velocity, False))
+        return [f"off {onset - self.started:.3f} {pitch} {now - onset:.3f}\n"]
 
     def receive(self, line):
         kind, *values = line.split()
@@ -129,6 +136,7 @@ class Duo:
             accompanying = self.played_at is not None and now - self.played_at < 1.0
             for onset, duration, pitch, hand, given in sorted(due, key=lambda n: n[:3]):
                 if now - onset > LATE_S:
+                    self.late += 1
                     continue
                 if pitch in self.sounding:
                     self._release(pitch, now)
@@ -189,7 +197,7 @@ def connect(address):
     host, port = address.rsplit(':', 1)
     sock = socket.create_connection((host, int(port)))
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    print(f"Playing with the AMT model at {address}")
+    print(f"Playing with the model's server at {address} (its log says which model)")
     return sock, time.monotonic()
 
 
@@ -210,7 +218,7 @@ if __name__ == "__main__":
     def listen():
         for line in sock.makefile('r'):
             duo.receive(line)
-        print("The AMT server closed the duo")
+        print("The model's server closed the duo")
 
     threading.Thread(target=listen, daemon=True).start()
 
@@ -245,6 +253,8 @@ if __name__ == "__main__":
         codeK.end()
         duo.stop(time.monotonic())
         sock.close()
+        print(f"The model played {sum(n[4] for n in duo.notes)} notes; {duo.late} came later than {LATE_S} s and "
+              f"were skipped")
         duo.save(f"generated/{int(time.time())}.mid")
         print("Recording Stopped")
         sys.exit(0)

@@ -115,8 +115,11 @@ ssh -t jetson sudo jetson_clocks   # the clocks go back to defaults after every 
 ```
 `run_duet.sh` restarts everything: the server on the Jetson, the SSH tunnel on port 8765, FluidSynth, `main.py` on the KeyStep and the piano roll.
 
-**Logs:** `~/amt_server.log` on the Jetson (`duo: started`, the key it hears you in each time it changes, then how many notes it heard and played);
-`duet.log`, `fluidsynth.log` and `pianoroll.log` on the laptop in `$LOG_DIR` (default `/tmp`).
+**Logs:** `~/amt_server.log` on the Jetson (`duo: started`, the key it hears you in each time it changes, then how many notes it heard and played, how long a note took to sample and how soon after your note its first one went out);
+`duet.log` (at the end, how many of the model's notes came later than `LATE_S` and were skipped), `fluidsynth.log` and `pianoroll.log` on the laptop in `$LOG_DIR` (default `/tmp`).
+If its first note after yours takes longer than `MARGIN` (150 ms) to go out, or many notes are skipped, the model is too slow for the duo: it answers you late.
+
+**How it hears you:** each of your notes enters its context when you played it, even if notes of its own already on their way come after it. Its duration is a guess when you press the key; when the note stops sounding (when you let go, or the pedal comes up), `main.py` says how long it lasted (`off <onset> <pitch> <duration>`) and the model hears that from its next note on, as Aria learnt the pedal: as longer notes. From then on a chord you hold counts as sounding until you let go.
 
 **Changing the code on the Jetson:** it does not pull from git; copy the files over, e.g.
 `scp music_transformer/duo.py jetson:~/Ai-Duet/music_transformer/`, then run `./run_duet.sh` again.
@@ -158,7 +161,7 @@ mkdir -p ~/models && wget -O ~/models/aria-medium-gen.safetensors \
 ```bash
 DUET_HOST=pc SERVER_ARGS="--engine aria --checkpoint ~/models/aria-medium-gen.safetensors" ./run_duet.sh
 ```
-Over a VPN, the network's delay adds to the model's: the model plays `LOOKAHEAD` (1 s) ahead and a new note of its sounds no sooner than `MARGIN` (150 ms); if `ping pc` is above ~60 ms or jumps around, raise `MARGIN` in `music_transformer/aria_duo.py` and `LATE_S` in `main.py`.
+Over a VPN, the network's delay adds to the model's: the model plays `LOOKAHEAD` (1 s) ahead and a new note of its sounds no sooner than `MARGIN` (150 ms); if `ping pc` is above ~60 ms or jumps around, raise `MARGIN` in `music_transformer/aria_duo.py` and `LATE_S` in `main.py`. The server log says, when a duo ends, how fast it was: if its first note after yours goes out well within `MARGIN`, `MARGIN` can come down and it answers you sooner.
 
 **Its knobs** (`KNOBS` in `music_transformer/aria_duo.py`, in the **Advanced** tab): Aria is a pianist already, so they nudge it less than AMT's and there are no rules against loops: `chord` (most notes it starts at once), `space` and `min_step` (time between its onsets while you play and when you rest), `out_of_key`, `chord_tone`, `tension`, `under`, `grid` (at its highest, 20, its own expressive timing), `max_rest`, `temperature` and `min_p` (how adventurous, as Aria's authors sample it), `lowest` and `highest`. The **AI mind** controls turn those it has.
 

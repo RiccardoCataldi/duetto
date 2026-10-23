@@ -148,15 +148,39 @@ class AriaSession:
         return self._last() - self.now()
 
     def hear(self, onset, duration, pitch, velocity=80):
-        """Your note, pressed at `onset`. Returns the time from which its unplayed notes are dropped, or None."""
+        """Your note, pressed at `onset`: Aria hears it when you played it, before those of its notes already on their
+        way that come after it. Returns the time from which its unplayed notes are dropped, or None."""
         self.listener.hear(onset, duration, pitch)
         tick = round(onset * 100)
         if self.base is None:
             self.base = tick
-        cut = self._forget_after(self.now() + MARGIN, tick - self.base)
-        self.heard_at = max(tick - self.base, self._last(), 0)
-        self._add((self.heard_at, False, pitch, _velocity(velocity), min(max(round(duration * 100), 1), MAX_DUR)))
-        return cut
+        self.heard_at = max(tick - self.base, 0)
+        horizon, later, cut = self.now() + MARGIN, self._unwind(self.heard_at), None
+        self._add((self.heard_at, False, pitch, _velocity(velocity), _duration(duration)))
+        for event in later:
+            if event[1] and event[0] > horizon:   # its own, not sounded yet: sampled again, now hearing you
+                cut = event[0] if cut is None else cut
+            else:
+                self._add(event)
+        return None if cut is None else self._seconds(cut)
+
+    def release(self, onset, pitch, duration):
+        """Your note pressed at `onset` stopped sounding after `duration`, the pedal's ring and all (Aria learnt the
+        pedal as longer notes): it hears how long it really was from its next note on."""
+        self.listener.release(onset, pitch, duration)
+        if self.base is None:
+            return
+        tick, ticks, at = max(round(onset * 100) - self.base, 0), _duration(duration), len(self.prefix)
+        for i, (when, mine, played, velocity, lasted) in enumerate(self.events):
+            while self.seq[at] == T:   # at: where each event's tokens start
+                at += 1
+            if (when, mine, played) == (tick, False, pitch):
+                if lasted != ticks:
+                    self.events[i] = (when, mine, played, velocity, ticks)
+                    self.seq[at + 2] = int(DUR_IDS[ticks - 1])
+                    self.fed = min(self.fed, at + 2)
+                return
+            at += 3
 
     @torch.no_grad()
     def play(self):
@@ -274,20 +298,21 @@ class AriaSession:
                                       ('dur', duration * STEP_MS)])
         self.events.append(event)
 
-    def _forget_after(self, tick, keep):
-        """Drops its trailing notes that start after `tick` (they have not sounded yet), and the <T> past `keep`."""
-        cut = None
+    def _unwind(self, tick):
+        """Takes out of the context the events that start after `tick`, and the <T> past its segment; returns them
+        in onset order. The cache is fed again from there."""
+        later = []
         while True:
-            if self.seq[-1] == T and self.segment * SEGMENT > max(keep, self._last()):
+            if self.seq[-1] == T and (self.segment > tick // SEGMENT or self._last() > tick):
                 self.seq.pop()
                 self.segment -= 1
-            elif self.events and self.events[-1][1] and self.events[-1][0] > tick and self.seq[-1] != T:
-                cut = self.events.pop()[0]
+            elif self.events and self._last() > tick:
+                later.insert(0, self.events.pop())
                 del self.seq[-3:]
             else:
                 break
         self.fed = min(self.fed, len(self.seq))
-        return None if cut is None else self._seconds(cut)
+        return later
 
     def _fit(self):
         """Keeps the context under CONTEXT tokens: the last WINDOW ticks, moved to start at 0, the cache rebuilt."""
@@ -307,3 +332,8 @@ class AriaSession:
 def _velocity(velocity):
     """Your velocity as Aria hears it: to its nearest step, 10 at the least."""
     return min(VELOCITIES, key=lambda v: abs(v - velocity))
+
+
+def _duration(seconds):
+    """Your note's duration as Aria hears it: in ticks, from one to its longest."""
+    return min(max(round(seconds * 100), 1), MAX_DUR)

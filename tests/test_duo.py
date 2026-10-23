@@ -37,6 +37,17 @@ class DuoTest(unittest.TestCase):
         self.duo.note_on(65, 90, 105)
         self.assertEqual(self.sent[-1], "on 5.000 0.100 65 90\n")
 
+    def test_when_your_note_stops_sounding_the_model_hears_how_long_it_lasted_pedal_and_all(self):
+        self.duo.note_on(60, 90, 101.0)
+        self.duo.note_off(60, 101.4)
+        self.assertEqual(self.sent[-1], "off 1.000 60 0.400\n")
+        self.duo.sustain(127, 102.0)
+        self.duo.note_on(62, 90, 102.5)
+        self.duo.note_off(62, 102.6)
+        self.assertTrue(self.sent[-1].startswith("on 2.500"))   # the pedal holds it
+        self.duo.sustain(0, 104.0)
+        self.assertEqual(self.sent[-1], "off 2.500 62 1.500\n")
+
     def test_the_model_plays_its_notes_when_they_are_due_and_lets_them_ring(self):
         self.duo.receive("note 2.000 0.500 67\n")
         self.duo.tick(101.9)
@@ -114,6 +125,7 @@ class DuoTest(unittest.TestCase):
         self.duo.receive("note 2.000 0.200 60\n")
         self.duo.tick(102.0 + main.LATE_S + 0.05)
         self.assertEqual(self.out.generated_on(), [])
+        self.assertEqual(self.duo.late, 1)
 
 
 if __name__ == '__main__':

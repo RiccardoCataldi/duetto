@@ -7,6 +7,7 @@ Serve the duo over TCP so the model can run on another machine (e.g. a Jetson).
 
 One line per message, times in seconds since the connection opened:
     client -> server   "on <onset> <duration> <pitch> <velocity>"   you pressed a key (the duration is a guess)
+    client -> server   "off <onset> <pitch> <duration>"  the key you pressed at <onset> stopped sounding (pedal and all)
     server -> client   "note <onset> <duration> <pitch> <hand> [<velocity>]"   the model's next note, of its left or
                                                       right hand; Aria says how hard, AMT leaves it to the client
     server -> client   "cut <onset>"                     forget the model's notes from <onset> on: they are resampled
@@ -22,14 +23,25 @@ A connection that starts with "knobs" turns the duo's knobs (the engine's KNOBS)
 import argparse
 import itertools
 import json
+import math
 import queue
 import socketserver
+import statistics
 import threading
 import time
 
 from types import SimpleNamespace
 
 STATE_S = 0.25    # how often a knobs connection hears what the duo is doing
+
+
+def ms(seconds):
+    """'40 ms (95% within 60 ms)': the median and the 95th percentile of `seconds`."""
+    if not seconds:
+        return '-'
+    ordered = sorted(seconds)
+    worst = ordered[math.ceil(0.95 * len(ordered)) - 1]
+    return f"{statistics.median(ordered) * 1000:.0f} ms (95% within {worst * 1000:.0f} ms)"
 
 
 def amt(model=None, left=None):
@@ -109,6 +121,7 @@ def make_handler(player):
                 threading.Thread(target=self.read, args=(inbox, first), daemon=True).start()
                 session = player.session(started=opened, **knobs)
                 heard, played, shown = 0, 0, None
+                sampling, answers, since = [], [], None   # seconds to sample each note; from your note to its next
                 playing.append(session)
                 try:
                     while True:
@@ -121,24 +134,35 @@ def make_handler(player):
                             note = False
                         if note is None:
                             break
-                        if note:
+                        if note and note[0] == 'off':
+                            session.release(*note[1:])
+                        elif note:
                             heard += 1
-                            cut = session.hear(*note)
+                            since = since or time.perf_counter()
+                            cut = session.hear(*note[1:])
                             key, sure = session.listener.key()
                             if key != shown and sure > 0.3:
                                 shown = key
-                                print(f"duo: {note[0]:.1f}s you are in {session.listener.name(key)} ({sure:.0%})")
+                                print(f"duo: {note[1]:.1f}s you are in {session.listener.name(key)} ({sure:.0%})")
                             if cut is not None:
                                 self.wfile.write(f"cut {cut:.3f}\n".encode())
                         elif session.ahead() < LOOKAHEAD:
+                            begun = time.perf_counter()
                             onset, duration, pitch, *how = session.play()
                             self.wfile.write(f"note {onset:.3f} {duration:.3f} {pitch} {' '.join(map(str, how))}\n".encode())
+                            sampling.append(time.perf_counter() - begun)
+                            if since:
+                                answers.append(time.perf_counter() - since)
+                                since = None
                             played += 1
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 finally:
                     playing.remove(session)
                 print(f"duo: ended, heard {heard} notes, played {played}")
+                if sampling:
+                    print(f"duo: a note took {ms(sampling)} to sample; its first after yours went out {ms(answers)} "
+                          f"after it (it sounds no sooner than {engine.MARGIN * 10} ms after)")
 
         def read(self, inbox, first):
             try:
@@ -146,7 +170,10 @@ def make_handler(player):
                     kind, *values = line.split()
                     if kind == b'on':
                         onset, duration, pitch, *velocity = values
-                        inbox.put((float(onset), float(duration), int(pitch), int(velocity[0]) if velocity else 80))
+                        inbox.put(('on', float(onset), float(duration), int(pitch), int(velocity[0]) if velocity else 80))
+                    elif kind == b'off':
+                        onset, pitch, duration = values
+                        inbox.put(('off', float(onset), int(pitch), float(duration)))
             except (ConnectionResetError, ValueError) as e:
                 print(f"duo: bad input ({e})")
             finally:

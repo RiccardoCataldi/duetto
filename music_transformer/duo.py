@@ -147,16 +147,22 @@ class DuoSession:
         return self._last_time() - self.now()
 
     def hear(self, onset, duration, pitch, velocity=None):
-        """Your note, pressed at `onset` (AMT does not hear how hard). Returns the time from which the model's unplayed notes are dropped, or None."""
+        """Your note, pressed at `onset` (AMT does not hear how hard): the model hears it when you played it, before
+        those of its notes already on their way that come after it. Returns the time from which the model's unplayed
+        notes are dropped, or None."""
         self.listener.hear(onset, duration, pitch)
         tick = round(onset * TIME_RESOLUTION)
         if self.base is None:
             self.base = tick
-        cut = self._forget_after(self.now() + MARGIN)
-        self.heard_at = max(tick - self.base, self._last_time(), 0)
-        self.seq += [TIME_OFFSET + self.heard_at,
-                     DUR_OFFSET + min(max(round(duration * TIME_RESOLUTION), 1), MAX_DUR - 1),
+        self.heard_at = max(tick - self.base, 0)
+        horizon, later, cut = self.now() + MARGIN, self._unwind(self.heard_at), None
+        self.seq += [TIME_OFFSET + self.heard_at, DUR_OFFSET + _duration(duration),
                      NOTE_OFFSET + self.you * MAX_PITCH + pitch]
+        for event in later:
+            if self._instrument(event[2]) in self._mine() and event[0] - TIME_OFFSET > horizon:
+                cut = self._seconds(event[0] - TIME_OFFSET) if cut is None else cut   # not sounded yet: sampled again
+            else:
+                self.seq += event
         # otherwise its own line, two or three times denser than yours, drowns you out
         events = self._events()
         kept = [e for e in events
@@ -164,6 +170,20 @@ class DuoSession:
         if len(kept) < len(events):
             self._restart(kept)
         return cut
+
+    def release(self, onset, pitch, duration):
+        """Your note pressed at `onset` stopped sounding after `duration`, the pedal's ring and all: the model hears
+        how long it really was from its next note on."""
+        self.listener.release(onset, pitch, duration)
+        if self.base is None:
+            return
+        time_ = TIME_OFFSET + max(round(onset * TIME_RESOLUTION) - self.base, 0)
+        for i in range(1, len(self.seq) - 2, 3):
+            if (self.seq[i], self.seq[i + 2]) == (time_, NOTE_OFFSET + self.you * MAX_PITCH + pitch):
+                if self.seq[i + 1] != DUR_OFFSET + _duration(duration):
+                    self.seq[i + 1] = DUR_OFFSET + _duration(duration)
+                    self._crop(i + 1)
+                return
 
     @torch.no_grad()
     def play(self):
@@ -293,16 +313,20 @@ class DuoSession:
                 banned.add(notes[i + self.no_repeat - 1])
         return banned
 
-    def _forget_after(self, tick):
-        """Drops the model's trailing notes that start after `tick`; they have not sounded yet."""
-        cut = None
-        while len(self.seq) > 1 and self._instrument(self.seq[-1]) in self._mine() and self._last_time() > tick:
-            cut = self._last_time()
+    def _unwind(self, tick):
+        """Takes out of the context the events that start after `tick`; returns them, oldest first."""
+        later = []
+        while len(self.seq) > 1 and self._last_time() > tick:
+            later.insert(0, self.seq[-3:])
             del self.seq[-3:]
-        if self.fed > len(self.seq):
-            self.past.crop(len(self.seq))
-            self.fed = len(self.seq)
-        return None if cut is None else (cut + self.base) / TIME_RESOLUTION
+        self._crop(len(self.seq))
+        return later
+
+    def _crop(self, length):
+        """The KV cache keeps at most seq[:length]; the rest is fed again."""
+        if self.fed > length:
+            self.past.crop(length)
+            self.fed = length
 
     def _fit(self):
         """Keeps the context under CONTEXT_SIZE tokens and its times under MAX_TIME."""
@@ -331,3 +355,8 @@ class DuoSession:
     @staticmethod
     def _instrument(note):
         return (note - NOTE_OFFSET) // MAX_PITCH
+
+
+def _duration(seconds):
+    """Your note's duration as the model hears it: in ticks, from one to its longest."""
+    return min(max(round(seconds * TIME_RESOLUTION), 1), MAX_DUR - 1)

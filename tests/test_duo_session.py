@@ -8,7 +8,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from anticipation.config import CONTEXT_SIZE, MAX_PITCH
-from anticipation.vocab import NOTE_OFFSET, TIME_OFFSET, VOCAB_SIZE
+from anticipation.vocab import DUR_OFFSET, NOTE_OFFSET, TIME_OFFSET, VOCAB_SIZE
 from music_transformer import duo
 from music_transformer.duo import DuoSession
 
@@ -81,7 +81,33 @@ class DuoSessionTest(unittest.TestCase):
         dropped = [n for n in notes if n[0] > 0.5 + duo.MARGIN / 100]
         self.assertEqual(cut, dropped[0][0] if dropped else None)
         self.assertEqual(len(self.session.seq), 1 + 3 * (1 + len(kept) + 1))
-        self.assertEqual(self.session.seq[-1], NOTE_OFFSET + 62)
+        events = self.session._events()
+        self.assertEqual([e[0] for e in events], sorted(e[0] for e in events))
+        self.assertIn([TIME_OFFSET + 50, DUR_OFFSET + 30, NOTE_OFFSET + 62], events)   # when you played it
+        self.session.play()
+        self.assertEqual(self.model.fed, len(self.session.seq) - 1)
+
+    def test_you_are_heard_when_you_played_even_before_its_notes_already_on_their_way(self):
+        self.session.hear(0.0, 0.3, 60)
+        notes = list(self.fill())
+        coming = next(n for n in notes if n[0] > 0.5)
+        self.clock.t = coming[0] - 0.05   # it sounds within MARGIN: it stays
+        self.session.hear(coming[0] - 0.08, 0.3, 62)   # your key reached it a little late
+        times = [e[0] - TIME_OFFSET for e in self.session._events()]
+        yours = [e[2] - NOTE_OFFSET for e in self.session._events()].index(62)
+        self.assertEqual(times[yours], round((coming[0] - 0.08) * 100))
+        self.assertIn(round(coming[0] * 100), times[yours + 1:])
+        self.assertEqual(times, sorted(times))
+        self.session.play()
+        self.assertEqual(self.model.fed, len(self.session.seq) - 1)
+
+    def test_when_you_let_go_it_hears_how_long_your_note_really_was(self):
+        self.session.hear(0.0, 0.3, 60)
+        list(self.fill())
+        self.session.release(0.0, 60, 2.0)
+        self.assertEqual(self.session.seq[2], DUR_OFFSET + 200)
+        self.assertEqual(self.session.past.length, 2)   # fed again from there
+        self.assertEqual(self.session.listener.held, set())
         self.session.play()
         self.assertEqual(self.model.fed, len(self.session.seq) - 1)
 

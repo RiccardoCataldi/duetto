@@ -54,6 +54,19 @@ class ListenerTest(unittest.TestCase):
             listener.hear(10.0, 1.0, pitch)
         self.assertEqual(listener.chord(10.3), {7, 11, 2, 5})
 
+    def test_a_chord_you_hold_sounds_past_the_guess_until_you_let_it_go(self):
+        for releases in (False, True):
+            listener = Listener()
+            play(listener, C_MAJOR)
+            if releases:   # you say when your notes stop sounding
+                listener.release(0.0, C_MAJOR[0], 0.2)
+            for pitch in (43, 59, 62, 65):   # G7, G in the bass, its duration guessed at 0.3 s
+                listener.hear(10.0, 0.3, pitch)
+            self.assertEqual(listener.chord_label(14.0), 'G7' if releases else None)
+        for pitch in (43, 59, 62, 65):
+            listener.release(10.0, pitch, 1.0)
+        self.assertIsNone(listener.chord(14.0))
+
     def test_it_hears_jazz_chords_and_tells_them_apart_by_the_bass(self):
         for pitches, name in (((48, 52, 55, 59), 'Cmaj7'), ((48, 52, 55, 57), 'C6'), ((45, 52, 55, 60), 'Am7'),
                               ((47, 53, 57, 62), 'Bm7b5'), ((43, 48, 50, 53), 'G7sus4')):

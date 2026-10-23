@@ -59,6 +59,8 @@ class Listener:
     def __init__(self):
         self.belief = np.full(24, 1 / 24)
         self.notes = []   # (onset, duration, pitch), oldest first
+        self.held = set() # (onset, pitch) of your notes still sounding: their duration is only a guess until release()
+        self.releases = False   # whether you say when your notes stop sounding (main.py does)
         self.move = MOVE
 
     def stay(self, stay):
@@ -66,9 +68,17 @@ class Listener:
         self.move = _transitions(stay)
 
     def hear(self, onset, duration, pitch):
+        """Your note. Once release() has been heard, it sounds on past `duration` until its own release() comes."""
         belief = (self.belief @ self.move) * np.exp(EMIT[:, pitch % 12])
         self.belief = belief / belief.sum()
         self.notes = [n for n in self.notes if n[0] > onset - KEEP_S] + [(onset, duration, pitch)]
+        self.held = {n for n in self.held if n[0] > onset - KEEP_S} | ({(onset, pitch)} if self.releases else set())
+
+    def release(self, onset, pitch, duration):
+        """Your note pressed at `onset` has stopped sounding: it lasted `duration`."""
+        self.releases = True
+        self.held.discard((onset, pitch))
+        self.notes = [(o, duration if (o, p) == (onset, pitch) else d, p) for o, d, p in self.notes]
 
     def key(self):
         """(key, how likely): 0-11 major from C, 12-23 minor."""
@@ -93,6 +103,8 @@ class Listener:
         weight, bass = np.zeros(12), None
         for onset, duration, pitch in self.notes:
             if onset <= now:
+                if (onset, pitch) in self.held:
+                    duration = max(duration, now - onset)
                 weight[pitch % 12] += 0.5 ** (max(now - onset - duration, 0) / CHORD_S)
                 if onset + duration >= now and (bass is None or pitch < bass):
                     bass = pitch

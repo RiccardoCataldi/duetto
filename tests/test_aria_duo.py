@@ -19,10 +19,12 @@ class UniformModel:
 
     def __init__(self):
         self.cached = 0
+        self.starts = []
 
     def __call__(self, tokens, start):
         assert start <= self.cached, (start, self.cached)
         self.cached = start + len(tokens)
+        self.starts.append(start)
         return torch.zeros(TOKENIZER.vocab_size)
 
 
@@ -109,6 +111,34 @@ class AriaSessionTest(unittest.TestCase):
         self.assertEqual(self.session.events[-1][2:4], (64, 100))
         self.follow(10)
         self.assertEqual(replay(self.session), self.events())
+
+    def test_you_are_heard_when_you_played_even_before_its_notes_already_on_their_way(self):
+        self.session.hear(0.0, 0.3, 60, 80)
+        notes = self.fill()
+        coming = next(n for n in notes if n[0] > 0.5)
+        self.clock.t = coming[0] - 0.05   # it sounds within MARGIN: it stays
+        cut = self.session.hear(coming[0] - 0.08, 0.3, 64, 90)   # your key reached it a little late
+        ticks = [e[0] for e in self.session.events]
+        yours = next(i for i, (_, mine, pitch, *_) in enumerate(self.session.events) if not mine and pitch == 64)
+        self.assertEqual(ticks[yours], round((coming[0] - 0.08) * 100))
+        self.assertIn(round(coming[0] * 100), ticks[yours + 1:])
+        self.assertEqual(ticks, sorted(ticks))
+        dropped = [n for n in notes if n[0] > self.clock.t + aria_duo.MARGIN / 100 + 1e-9]
+        self.assertEqual(cut, dropped[0][0] if dropped else None)
+        self.assertEqual(replay(self.session), self.events())
+        self.follow(10)
+        self.assertEqual(replay(self.session), self.events())
+
+    def test_when_you_let_go_it_hears_how_long_your_note_really_was(self):
+        self.session.hear(0.0, 0.3, 60, 80)
+        self.follow(20)
+        self.session.release(0.0, 60, 2.0)
+        self.assertEqual(self.session.events[0][4], 200)
+        self.assertEqual(replay(self.session), self.events())
+        self.assertEqual(self.session.listener.held, set())
+        self.model.starts.clear()
+        self.session.play()
+        self.assertEqual(self.model.starts[0], len(self.session.prefix) + 2)   # fed again from its duration on
 
     def test_it_never_doubles_a_key_nor_starts_more_than_its_chord_at_once(self):
         session = AriaSession(StuckModel(), clock=self.clock, chord=2, min_step=20, space=20)
