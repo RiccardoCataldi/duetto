@@ -35,7 +35,16 @@ LOOKAHEAD = 100   # ticks it plays ahead of now (1 s)
 MARGIN = 15       # ticks: a new note of its sounds no earlier than this, to cover sampling and the network
 PLAYING = 100     # ticks after your last note that you still count as playing
 CHORD = 3         # ticks within which its onsets make one chord (a pianist's chord is never quite together)
-SPLIT = 60        # under middle C a note is its left hand's (for the client's dynamics and the piano roll only)
+SPLIT = 60        # under middle C a note is a left hand's (its own: for the client's dynamics and the piano roll)
+# where it plays against you, as a second pianist: clear of your hands while you play, up where a melody sings when
+# you rest
+RECENT = 200      # ticks of your playing, up to your last note, that say where your hands are
+HAND_GAP = 12     # semitones between two of your notes that make them two hands, with room between them
+AROUND = 2        # semitones it keeps clear under and over each of your hands
+TOP = 72          # once your top hand reaches C5 you play the melody: while you play, the keys over it are yours too
+ROOM = 12         # free keys it needs in its octaves to keep apart at full strength; with fewer, it keeps apart less
+MELODY = (72, 79) # where its line sings when you rest: the middle of your right hand, from C5 to G5
+PITCHES = torch.arange(128, dtype=torch.float)
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does.
 # Aria is a pianist already: they nudge it less than AMT's, and it needs no rules against loops or doubled notes.
@@ -47,7 +56,8 @@ KNOBS = {
     'out_of_key': (0.5, 0.0, 6.0, '', "how strongly it keeps to your key"),
     'chord_tone': (0.5, 0.0, 4.0, '', "how much it leans on the chord you play"),
     'tension': (0.5, 0.0, 4.0, '', "how much it colours your chord with its 9th, 11th and 13th"),
-    'under': (0.5, 0.0, 4.0, '', "how firmly it stays below you while you play"),
+    'apart': (2.0, 0.0, 6.0, '', "how firmly it keeps apart from your hands, and under your melody, while you play"),
+    'lead': (3.0, 0.0, 6.0, '', "how firmly it takes the melody, up where yours was, when you rest"),
     'grid': (20, 0, 20, 'ticks', "how far off your pulse its onsets may land (20: free, as Aria plays)"),
     'stay': (STAY, 0.80, 0.995, '', "how sure it must be you modulated (lower = sooner)"),
     'max_rest': (300, 50, 800, 'ticks', "the longest silence it may leave"),
@@ -56,7 +66,8 @@ KNOBS = {
     'lowest': (0, 0, 8, 'octave_from', "the lowest octave it may play"),
     'highest': (8, 0, 8, 'octave_to', "the highest octave it may play"),
 }
-IN_EFFECT = {'listening': set(), 'accompanying': {'space', 'under', 'chord'}, 'alone': {'min_step', 'solo_chord'}}
+IN_EFFECT = {'listening': set(), 'accompanying': {'space', 'apart', 'chord'},
+             'alone': {'min_step', 'solo_chord', 'lead'}}
 ALWAYS = {'out_of_key', 'chord_tone', 'tension', 'stay', 'max_rest', 'temperature', 'min_p', 'lowest', 'highest'}
 
 
@@ -65,6 +76,18 @@ def knob(name, value):
     default, low, high, *_ = KNOBS[name]
     value = min(max(value, low), high)
     return round(value) if isinstance(default, int) else float(value)
+
+
+def hands(pitches):
+    """Where your hands are: (lowest, highest) of each, from the bottom. Notes an octave or more apart are two hands,
+    with room between them; closer, they are one hand, the keys between them included."""
+    out = []
+    for pitch in sorted(set(pitches)):
+        if out and pitch - out[-1][1] < HAND_GAP:
+            out[-1] = (out[-1][0], pitch)
+        else:
+            out.append((pitch, pitch))
+    return out
 
 
 class AriaModel:
@@ -215,11 +238,13 @@ class AriaSession:
             mask = torch.full_like(logits, -float('inf'))
             low, high = self.octaves()
             notes = NOTE_IDS[low:high + 1].to(logits.device)
-            bias = self._partner(here[0], you_play)[low:high + 1]
+            bias = self._partner(here[0])[low:high + 1]
             for e in mine:
                 if e[0] >= here[0] - CHORD and low <= e[2] <= high:   # a key it is already striking now
                     bias[e[2] - low] = -float('inf')
-            mask[notes] = bias.to(logits.device)[:, None].expand_as(notes)
+            bias = bias.to(logits.device)
+            register = self._register(here[0], you_play)[low:high + 1].to(logits.device)
+            mask[notes] = (bias + self._level(logits[notes] + bias[:, None], register))[:, None].expand_as(notes)
             if later:
                 mask[T] = 0
             token = self._sample(logits + mask)
@@ -256,18 +281,41 @@ class AriaSession:
         on = [t for t in ticks if abs((t - phase + unit / 2) % unit - unit / 2) <= self.grid]
         return on or ticks or [latest]
 
-    def _partner(self, tick, you_play):
-        """Logits added to each of the 128 pitches at `tick`: your chord, its tensions and your key; under you while
-        you play."""
+    def _partner(self, tick):
+        """Logits added to each of the 128 pitches at `tick`: your chord, its tensions and your key."""
         if self.heard_at is None:
             return torch.zeros(128)
-        at = self._seconds(tick)
-        bias = torch.tensor(self.listener.bias(at, self.chord_tone, self.tension, self.out_of_key), dtype=torch.float)
+        return torch.tensor(self.listener.bias(self._seconds(tick), self.chord_tone, self.tension, self.out_of_key),
+                            dtype=torch.float)
+
+    def _register(self, tick, you_play):
+        """Logits added to each of the 128 pitches for where it plays at `tick`, as a second pianist: while you play,
+        -apart on your hands and over your melody, less when that leaves it little room; when you rest, down to -lead
+        an octave under where a melody sings (the middle of your right hand, from C5 to G5)."""
+        register = torch.zeros(128)
+        if self.heard_at is None:
+            return register
+        notes = self.listener.notes
         if you_play:
-            recent = at - PLAYING / 100 - 1
-            low = min((n[2] for n in self.listener.notes if n[0] >= recent), default=128)
-            bias[low:] -= self.under
-        return bias
+            at, since = self._seconds(tick), self._seconds(self.heard_at - RECENT)
+            playing = [p for o, d, p in notes if o >= since or o + d >= at or (o, p) in self.listener.held]
+            yours = hands(playing)
+            for lowest, highest in yours:
+                register[max(lowest - AROUND, 0):highest + AROUND + 1] = -self.apart
+            if yours and yours[-1][1] >= TOP:   # the melody is yours: it does not comp over it
+                register[yours[-1][1] + AROUND + 1:] = -self.apart
+            low, high = self.octaves()
+            return register * min(int((register[low:high + 1] == 0).sum()) / ROOM, 1)
+        right = sorted(p for _, _, p in notes if p >= SPLIT)
+        middle = min(max(right[len(right) // 2] if right else 0, MELODY[0]), MELODY[1])
+        return -self.lead * ((middle - PITCHES) / 12).clamp(0, 1)
+
+    def _level(self, logits, register):
+        """`register` raised as a whole so that, against the `logits` of its notes (pitch by velocity), it moves where
+        it plays and never how likely it is to play rather than rest."""
+        mass = torch.logsumexp(logits / self.temperature, 1)
+        lift = torch.logsumexp(mass, 0) - torch.logsumexp(mass + register / self.temperature, 0)
+        return register + self.temperature * torch.nan_to_num(lift, nan=0.0, posinf=0.0, neginf=0.0)
 
     def _sample(self, logits):
         probs = torch.softmax(logits / self.temperature, -1)

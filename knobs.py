@@ -51,9 +51,14 @@ MACROS = [
 ENGINE_TURNS = {'aria': {
     'density': {'min_step': (40, 0, 0), 'space': (100, 15, 0), 'max_rest': (600, 300, 100)},
     'harmony': {'out_of_key': (3.0, 0.5, 0.0), 'chord_tone': (2.0, 0.5, 0.0), 'tension': (0.0, 0.5, 2.0)},
-    'role': {'under': (2.0, 0.5, 0.0)},
+    'role': {'apart': (4.0, 2.0, 0.0), 'lead': (0.0, 3.0, 6.0)},
     'groove': {'grid': (20, 20, 3)},
     'risk': {'temperature': (0.7, 0.95, 1.3), 'min_p': (0.1, 0.035, 0.0)},
+}}
+# what a control does with a model, where it is not what it does with AMT
+ENGINE_WHAT = {'aria': {
+    'role': "while you play: it keeps apart from your hands and under your melody, or goes anywhere; when you rest: it "
+            "comps on, or takes the melody, up where yours was",
 }}
 MODES = {'listening': 'waiting for you to play', 'accompanying': 'accompanying you', 'answering': 'answering you',
          'alone': 'playing on its own'}
@@ -172,10 +177,7 @@ class Mind:
                 sock.settimeout(None)
                 with self.lock:
                     self.knobs, self.sock = knobs, sock
-                for name, value in self._saved('knobs').items():   # as you left them
-                    if name in knobs:
-                        knobs[name].value = value
-                        self.send(knobs[name])
+                self._restore(knobs)
                 for line in lines:
                     if line.startswith('state '):
                         self.state = json.loads(line[6:])
@@ -184,6 +186,19 @@ class Mind:
             with self.lock:
                 self.knobs, self.sock, self.state = {}, None, None
             time.sleep(2)
+
+    def _restore(self, knobs):
+        """Gives the server back its knobs as you left them; one you never turned starts where its control stands."""
+        saved = self._saved('knobs')
+        for name, knob in knobs.items():
+            if name in saved:
+                knob.value = saved[name]
+                self.send(knob)
+        for macro in self.macros:
+            for name, anchors in self.turns[macro.name].items():
+                if name in knobs and name not in saved:
+                    knobs[name].value = along(anchors, macro.value)
+                    self.send(knobs[name])
 
     def send(self, knob):
         with self.lock:
@@ -208,8 +223,9 @@ class Mind:
         """The server plays `engine`: its controls, and its knobs and controls as you left them."""
         self.engine = engine
         self.turns = {label: ENGINE_TURNS.get(engine, {}).get(label, turns) for label, _, _, turns in MACROS}
-        for macro in self.macros:
-            macro.value = self._saved('macros').get(macro.name, 0.5)
+        for macro, (label, _, what, _) in zip(self.macros, MACROS):
+            macro.value = self._saved('macros').get(label, 0.5)
+            macro.what = ENGINE_WHAT.get(engine, {}).get(label, what)
 
     def _saved(self, what):
         """What you left turned for this engine: 'knobs' or 'macros' (AMT's under those names, as it always was)."""

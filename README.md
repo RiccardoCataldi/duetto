@@ -37,7 +37,7 @@ python pianoroll.py video generated/<time>.mid --audio duo.ogg -o duo.mp4
 
 ![The piano roll with the knobs](samples/duo/pianoroll-knobs.png)
 
-At the top it says what the model hears and does: your key, the chord you play, your tempo once it has found your pulse, and whether it is accompanying you, answering your phrase or playing on its own. Beside it are knobs (`knobs.py`) to turn while you play, in four tabs. Drag a knob up or down (hold Shift to turn it finely) or use the wheel over it; a double click puts it back, and hovering says what it does. A knob is dimmed while what it shapes is not happening: `dialogue` while you play, `role` while you rest, `groove` until it has found your pulse.
+At the top it says what the model hears and does: your key, the chord you play, your tempo once it has found your pulse, and whether it is accompanying you, answering your phrase or playing on its own. Beside it are knobs (`knobs.py`) to turn while you play, in four tabs. Drag a knob up or down (hold Shift to turn it finely) or use the wheel over it; a double click puts it back, and hovering says what it does. A knob is dimmed while what it shapes is not happening: `dialogue` while you play, `role` while you rest (with Aria it shapes both), `groove` until it has found your pulse.
 
 - **AI mind**: musical controls, each with its two ends; each turns some of the model's knobs on the Jetson along a line whose middle is the duo's default:
 
@@ -45,7 +45,7 @@ At the top it says what the model hears and does: your key, the chord you play, 
   |---|---|---|
   | density | sparse ... dense | `min_step`, `space`, `max_rest` |
   | harmony | inside ... outside | `out_of_key`, `chord_tone`, `tension` |
-  | role | accompanies ... leads (while you play) | `under` |
+  | role | accompanies ... leads (while you play; with Aria, and when you rest) | `under` (Aria: `apart`, `lead`) |
   | dialogue | ignores you ... answers you (when your phrase ends) | `answer`, `echo` |
   | groove | loose ... tight | `grid` |
   | risk | safe ... adventurous | `temperature`, `top_p` |
@@ -163,7 +163,7 @@ DUET_HOST=pc SERVER_ARGS="--engine aria --checkpoint ~/models/aria-medium-gen.sa
 ```
 Over a VPN, the network's delay adds to the model's: the model plays `LOOKAHEAD` (1 s) ahead and a new note of its sounds no sooner than `MARGIN` (150 ms); if `ping pc` is above ~60 ms or jumps around, raise `MARGIN` in `music_transformer/aria_duo.py` and `LATE_S` in `main.py`. The server log says, when a duo ends, how fast it was: if its first note after yours goes out well within `MARGIN`, `MARGIN` can come down and it answers you sooner.
 
-**Its knobs** (`KNOBS` in `music_transformer/aria_duo.py`, in the **Advanced** tab): Aria is a pianist already, so they nudge it less than AMT's and there are no rules against loops: `chord` and `solo_chord` (most notes it starts at once while you play, and when you leave it room: low, it plays lines and arpeggios rather than blocks), `space` and `min_step` (time between its onsets while you play and when you rest), `out_of_key`, `chord_tone`, `tension`, `under`, `grid` (at its highest, 20, its own expressive timing), `max_rest`, `temperature` and `min_p` (how adventurous, as Aria's authors sample it), `lowest` and `highest`. The **AI mind** controls turn those it has.
+**Its knobs** (`KNOBS` in `music_transformer/aria_duo.py`, in the **Advanced** tab): Aria is a pianist already, so they nudge it less than AMT's and there are no rules against loops: `chord` and `solo_chord` (most notes it starts at once while you play, and when you leave it room: low, it plays lines and arpeggios rather than blocks), `space` and `min_step` (time between its onsets while you play and when you rest), `out_of_key`, `chord_tone`, `tension`, `apart` and `lead` (where it plays against you, as a second pianist: while you play it keeps apart from your hands, the keys you played in the last 2 s or that still sound, and, once your top hand reaches C5, from over your melody, so it comps between your hands or under them, less firmly when that leaves it under 12 free keys; when you rest it takes the melody, up from an octave under the middle of your right hand, C5 to G5; neither changes how much it plays, only where; `role` turns both), `grid` (at its highest, 20, its own expressive timing), `max_rest`, `temperature` and `min_p` (how adventurous, as Aria's authors sample it), `lowest` and `highest`. The **AI mind** controls turn those it has.
 
 **Its tests** need torch and aria-utils, not the model: `python -m unittest tests.test_aria_duo`.
 

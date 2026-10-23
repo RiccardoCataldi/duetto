@@ -19,7 +19,8 @@ class MindTest(unittest.TestCase):
             self.mind.send(knob)
 
         for name, (low, high, default) in {'min_step': (5, 60, 20), 'space': (10, 150, 50),
-                                           'under': (0.0, 4.0, 1.0), 'echo': (0.0, 6.0, 3.0)}.items():
+                                           'under': (0.0, 4.0, 1.0), 'echo': (0.0, 6.0, 3.0),
+                                           'apart': (0.0, 6.0, 2.0), 'lead': (0.0, 6.0, 3.0)}.items():
             self.mind.knobs[name] = knobs.Knob(name, default, low, high, default, '', '', isinstance(low, int),
                                                send)
 
@@ -58,11 +59,27 @@ class MindTest(unittest.TestCase):
         self.mind._play('aria')
         self.assertEqual(self.macro('role').value, 0.5)   # Aria's as you left them: never turned
         self.macro('role').set(0.0)
-        self.assertEqual(self.mind.knobs['under'].value, 2.0)   # along Aria's line, not AMT's
+        # along Aria's line: apart from your hands, and it does not take the melody; AMT's under stays as AMT left it
+        self.assertEqual((self.mind.knobs['apart'].value, self.mind.knobs['lead'].value), (4.0, 0.0))
+        self.assertEqual(self.mind.knobs['under'].value, 3.0)
+        self.assertIn('your hands', self.macro('role').what)
         again = knobs.Mind(None, self.path)
-        self.assertEqual((again.saved['knobs']['under'], again.saved['knobs_aria']['under']), (3.0, 2.0))
+        self.assertEqual((again.saved['knobs']['under'], again.saved['knobs_aria']['apart']), (3.0, 4.0))
+        self.assertIn('below you', next(m for m in again.macros if m.name == 'role').what)
         again._play('aria')
         self.assertEqual(next(m for m in again.macros if m.name == 'role').value, 0.0)
+
+    def test_a_knob_you_never_turned_starts_where_its_control_stands(self):
+        self.mind._play('aria')
+        self.macro('role').set(1.0)                 # leads, saved while the server had other knobs
+        again = knobs.Mind(None, self.path)
+        again.sock = DummySocket()
+        again._play('aria')
+        again.saved['knobs_aria'] = {'space': 30}   # as if only space had ever been turned
+        served = {name: knobs.Knob(name, default, 0, 150, default, '', '', False, again.send)
+                  for name, default in (('space', 50.0), ('apart', 2.0), ('lead', 3.0))}
+        again._restore(served)
+        self.assertEqual({name: knob.value for name, knob in served.items()}, {'space': 30, 'apart': 0.0, 'lead': 6.0})
 
 
 class DummySocket:

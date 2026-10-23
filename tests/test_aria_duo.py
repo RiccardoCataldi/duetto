@@ -183,6 +183,79 @@ class AriaSessionTest(unittest.TestCase):
         self.assertIn('solo_chord', session.state()['active'])
         self.assertNotIn('chord', session.state()['active'])
 
+    def test_your_hands_are_where_you_play_an_octave_apart(self):
+        self.assertEqual(aria_duo.hands([52, 55, 59, 62, 76, 79, 83]), [(52, 62), (76, 83)])
+        self.assertEqual(aria_duo.hands([60, 71]), [(60, 71)])   # a seventh apart: one hand, the keys between too
+        self.assertEqual(aria_duo.hands([60, 72]), [(60, 60), (72, 72)])   # an octave: room between
+        self.assertEqual(aria_duo.hands([]), [])
+
+    def test_while_you_play_it_keeps_apart_from_your_hands_and_under_your_melody(self):
+        self.session.turn(apart=4.0)
+        for pitch in (40, 44, 47, 76, 79, 83):   # a left hand and a right hand, held
+            self.session.hear(0.0, 30.0, pitch, 80)
+        self.clock.t = 0.5                         # you are playing
+        pitches = [self.session.play()[2] for _ in range(30)]
+        self.assertFalse([p for p in pitches if 38 <= p <= 49 or p >= 74], pitches)
+        self.assertTrue([p for p in pitches if 50 <= p <= 73], pitches)
+
+    def test_while_you_only_comp_it_may_take_the_melody_over_you(self):
+        self.session.turn(apart=4.0)
+        for pitch in (48, 52, 55, 59):             # your left hand alone, held
+            self.session.hear(0.0, 30.0, pitch, 80)
+        self.clock.t = 0.5
+        pitches = [self.session.play()[2] for _ in range(30)]
+        self.assertFalse([p for p in pitches if 46 <= p <= 61], pitches)
+        self.assertTrue([p for p in pitches if p >= 72], pitches)
+
+    def test_when_your_hands_leave_it_no_room_it_plays_as_it_would(self):
+        runs = []
+        for apart in (0.0, 6.0):
+            torch.manual_seed(0)
+            session = AriaSession(UniformModel(), clock=Clock(), lowest=4, highest=5, apart=apart)
+            for pitch in (60, 64, 67, 72, 76, 79):   # one hand over all of C4-B5, and your melody on top
+                session.hear(0.0, 30.0, pitch, 80)
+            runs.append([session.play() for _ in range(20)])
+        self.assertEqual(runs[0], runs[1])
+
+    def test_a_bass_under_its_octaves_neither_moves_it_nor_makes_it_rest(self):
+        runs = []
+        for apart in (0.0, 4.0):
+            torch.manual_seed(0)
+            session = AriaSession(UniformModel(), clock=Clock(), lowest=4, apart=apart)
+            session.hear(0.0, 3.0, 29, 80)   # F1, held: under C4, its lowest
+            runs.append([session.play() for _ in range(20)])
+        self.assertEqual(runs[0], runs[1])
+
+    def test_where_it_plays_never_changes_how_likely_it_is_to_rest(self):
+        rests, inside = [], []
+        for apart in (0.0, 4.0):
+            session = AriaSession(UniformModel(), clock=self.clock, apart=apart, max_rest=800)   # <T> competes
+            for pitch in (60, 64):
+                session.hear(0.0, 3.0, pitch, 80)
+            seen, sample = [], session._sample
+            session._sample = lambda logits: seen.append(torch.softmax(logits / session.temperature, -1)) or sample(logits)
+            session.play()
+            rests.append(float(seen[0][T]))
+            inside.append(float(seen[0][NOTE_IDS[58:67]].sum()))   # your hand, 60-64, and AROUND it
+        self.assertAlmostEqual(rests[0], rests[1], places=5)
+        self.assertLess(inside[1], inside[0] / 10)
+
+    def test_when_you_rest_it_sings_up_around_your_right_hand(self):
+        for i, pitch in enumerate((43, 47, 50, 74, 76, 77, 79, 81)):
+            self.session.hear(i * 0.1, 0.3, pitch, 80)
+        self.clock.t = 3.0                          # you rest
+        self.session.turn(lead=4.0)
+        pitches = [pitch for _, _, pitch, *_ in self.follow(40)]
+        self.assertTrue(all(p >= 65 for p in pitches), pitches)   # an octave under the middle of your right hand, 77
+        self.assertGreaterEqual(sorted(pitches)[len(pitches) // 2], 77)
+
+    def test_when_you_rest_after_your_left_hand_alone_it_sings_from_c5(self):
+        for i, pitch in enumerate((36, 43, 48, 52, 55)):
+            self.session.hear(i * 0.1, 0.3, pitch, 80)
+        self.clock.t = 3.0
+        self.session.turn(lead=4.0)
+        self.assertTrue(all(pitch > 60 for _, _, pitch, *_ in self.follow(40)))
+
     def test_it_plays_only_in_the_octaves_it_is_given(self):
         self.session.turn(lowest=5, highest=4)
         self.session.hear(0.0, 0.3, 30, 80)
@@ -225,9 +298,13 @@ class AriaSessionTest(unittest.TestCase):
         self.clock.t = 0.35
         state = self.session.state()
         self.assertEqual((state['mode'], state['chord']), ('accompanying', 'G7'))
-        self.assertIn('under', state['active'])
+        self.assertIn('apart', state['active'])
+        self.assertNotIn('lead', state['active'])
         self.clock.t = 5.0
-        self.assertEqual(self.session.state()['mode'], 'alone')
+        state = self.session.state()
+        self.assertEqual(state['mode'], 'alone')
+        self.assertIn('lead', state['active'])
+        self.assertNotIn('apart', state['active'])
 
     def test_knobs_hold_from_the_start_and_stay_within_their_range(self):
         session = AriaSession(UniformModel(), clock=self.clock, min_p=2.0, genre=None)
