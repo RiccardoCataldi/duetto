@@ -80,6 +80,11 @@ class MindTest(unittest.TestCase):
                   for name, default in (('space', 50.0), ('apart', 2.0), ('lead', 3.0))}
         again._restore(served)
         self.assertEqual({name: knob.value for name, knob in served.items()}, {'space': 30, 'apart': 0.0, 'lead': 6.0})
+        self.assertEqual(again.saved['knobs_aria'], {'space': 30})   # not kept: they go on following their control
+        again.saved['macros_aria']['role'] = 0.5
+        again._play('aria')
+        again._restore(served)                      # the next time it connects
+        self.assertEqual((served['apart'].value, served['lead'].value), (2.0, 3.0))
 
 
 class DummySocket:

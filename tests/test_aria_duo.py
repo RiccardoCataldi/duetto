@@ -38,6 +38,16 @@ class StuckModel(UniformModel):
         return logits
 
 
+class PeakedModel(UniformModel):
+    """Wants pitch 62 most of all, and to rest almost as much."""
+
+    def __call__(self, tokens, start):
+        logits = super().__call__(tokens, start)
+        logits[NOTE_IDS[62, -1]] = 8.4
+        logits[T] = 7.8
+        return logits
+
+
 class ChordModel(StuckModel):
     """As StuckModel, and as soon as it may: it piles up chords."""
 
@@ -227,18 +237,24 @@ class AriaSessionTest(unittest.TestCase):
         self.assertEqual(runs[0], runs[1])
 
     def test_where_it_plays_never_changes_how_likely_it_is_to_rest(self):
-        rests, inside = [], []
-        for apart in (0.0, 4.0):
-            session = AriaSession(UniformModel(), clock=self.clock, apart=apart, max_rest=800)   # <T> competes
-            for pitch in (60, 64):
-                session.hear(0.0, 3.0, pitch, 80)
-            seen, sample = [], session._sample
-            session._sample = lambda logits: seen.append(torch.softmax(logits / session.temperature, -1)) or sample(logits)
-            session.play()
-            rests.append(float(seen[0][T]))
-            inside.append(float(seen[0][NOTE_IDS[58:67]].sum()))   # your hand, 60-64, and AROUND it
-        self.assertAlmostEqual(rests[0], rests[1], places=5)
-        self.assertLess(inside[1], inside[0] / 10)
+        for temperature in (0.5, 0.95, 1.5):
+            runs = []
+            for apart in (0.0, 6.0):
+                torch.manual_seed(0)
+                session = AriaSession(PeakedModel(), clock=self.clock, apart=apart, temperature=temperature,
+                                      max_rest=800)   # <T> competes
+                for pitch in (60, 64):                  # your hand, round the key it wants most
+                    session.hear(0.0, 3.0, pitch, 80)
+                seen, sample = [], session._sample
+                session._sample = lambda logits, seen=seen, sample=sample: seen.append(logits.clone()) or sample(logits)
+                session.play()
+                runs.append(seen)
+            # whether it plays: the same logits, so the same chance after min_p, at any temperature
+            self.assertTrue(torch.equal(runs[0][0], runs[1][0]))
+            self.assertTrue(torch.isfinite(runs[0][0][T]))   # resting is one of its choices there
+            # where: <T> out of it, and the key in your hand pushed away
+            where = [[logits for logits in seen if logits[T] == -float('inf')][0] for seen in runs]
+            self.assertLess(float(where[1][NOTE_IDS[62, -1]]), float(where[0][NOTE_IDS[62, -1]]) - 5)
 
     def test_when_you_rest_it_sings_up_around_your_right_hand(self):
         for i, pitch in enumerate((43, 47, 50, 74, 76, 77, 79, 81)):

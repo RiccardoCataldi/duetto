@@ -193,14 +193,15 @@ class Mind:
         for name, knob in knobs.items():
             if name in saved:
                 knob.value = saved[name]
-                self.send(knob)
+                self.send(knob, keep=False)
         for macro in self.macros:
             for name, anchors in self.turns[macro.name].items():
-                if name in knobs and name not in saved:
+                if name in knobs and name not in saved:   # not kept: it follows its control until you turn it
                     knobs[name].value = along(anchors, macro.value)
-                    self.send(knobs[name])
+                    self.send(knobs[name], keep=False)
 
-    def send(self, knob):
+    def send(self, knob, keep=True):
+        """Turns `knob` on the server and, unless `keep` is False, keeps it for next time."""
         with self.lock:
             sock = self.sock
         if sock is None:
@@ -209,8 +210,9 @@ class Mind:
             sock.sendall(f"set {knob.name} {knob.value:.4f}\n".encode())
         except OSError:
             return
-        self._saved('knobs')[knob.name] = knob.value
-        self._save()
+        if keep:
+            self._saved('knobs')[knob.name] = knob.value
+            self._save()
 
     def _macro(self, macro):
         for name, anchors in self.turns[macro.name].items():

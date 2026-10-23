@@ -243,14 +243,16 @@ class AriaSession:
                 if e[0] >= here[0] - CHORD and low <= e[2] <= high:   # a key it is already striking now
                     bias[e[2] - low] = -float('inf')
             bias = bias.to(logits.device)
-            register = self._register(here[0], you_play)[low:high + 1].to(logits.device)
-            mask[notes] = (bias + self._level(logits[notes] + bias[:, None], register))[:, None].expand_as(notes)
-            if later:
+            if later:   # whether it plays now or rests on: as it would wherever it played
+                mask[notes] = bias[:, None].expand_as(notes)
                 mask[T] = 0
+                if self._sample(logits + mask) == T:
+                    self._push([T])
+                    continue
+                mask[T] = -float('inf')
+            register = self._register(here[0], you_play)[low:high + 1].to(logits.device)   # then where
+            mask[notes] = (bias + register)[:, None].expand_as(notes)
             token = self._sample(logits + mask)
-            if token == T:
-                self._push([T])
-                continue
             index = (notes == token).nonzero()[0]
             pitch, velocity = low + int(index[0]), VELOCITIES[int(index[1])]
             break
@@ -309,13 +311,6 @@ class AriaSession:
         right = sorted(p for _, _, p in notes if p >= SPLIT)
         middle = min(max(right[len(right) // 2] if right else 0, MELODY[0]), MELODY[1])
         return -self.lead * ((middle - PITCHES) / 12).clamp(0, 1)
-
-    def _level(self, logits, register):
-        """`register` raised as a whole so that, against the `logits` of its notes (pitch by velocity), it moves where
-        it plays and never how likely it is to play rather than rest."""
-        mass = torch.logsumexp(logits / self.temperature, 1)
-        lift = torch.logsumexp(mass, 0) - torch.logsumexp(mass + register / self.temperature, 0)
-        return register + self.temperature * torch.nan_to_num(lift, nan=0.0, posinf=0.0, neginf=0.0)
 
     def _sample(self, logits):
         probs = torch.softmax(logits / self.temperature, -1)
