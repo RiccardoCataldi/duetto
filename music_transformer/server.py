@@ -59,6 +59,9 @@ def aria(checkpoint, genre='jazz'):
     """The duo with Aria (aria_duo.py)."""
     from music_transformer import aria_duo
     model = aria_duo.AriaModel(checkpoint)
+    warm = aria_duo.AriaSession(model, genre=genre)   # its first note on the GPU takes ~0.3 s: not in your duo
+    warm.hear(0.0, 0.3, 60)
+    warm.play()
     print(f"Aria loaded on {model.device} from {checkpoint}")
     return SimpleNamespace(engine=aria_duo, session=lambda **kw: aria_duo.AriaSession(model, genre=genre, **kw))
 
