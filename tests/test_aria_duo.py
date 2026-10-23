@@ -8,7 +8,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
     from music_transformer import aria_duo
-    from music_transformer.aria_duo import NOTE_IDS, SEGMENT, T, TOKENIZER, VELOCITIES, AriaSession
+    from music_transformer.aria_duo import NOTE_IDS, ONSET_IDS, SEGMENT, T, TOKENIZER, VELOCITIES, AriaSession
 except ImportError as e:   # ariautils is not installed here
     aria_duo = None
     MISSING = str(e)
@@ -35,6 +35,15 @@ class StuckModel(UniformModel):
         logits = super().__call__(tokens, start)
         logits[NOTE_IDS[61, -1]] = 50
         logits[T] = -50
+        return logits
+
+
+class ChordModel(StuckModel):
+    """As StuckModel, and as soon as it may: it piles up chords."""
+
+    def __call__(self, tokens, start):
+        logits = super().__call__(tokens, start)
+        logits[ONSET_IDS] = -torch.arange(SEGMENT).float()
         return logits
 
 
@@ -155,6 +164,24 @@ class AriaSessionTest(unittest.TestCase):
             self.assertEqual(len(pitches), len(set(pitches)))
         times = [onset for onset, _ in groups]
         self.assertGreaterEqual(min(b - a for a, b in zip(times, times[1:])), 0.2 - 1e-9)
+
+    def test_it_comps_in_chords_while_you_play_and_plays_lines_when_you_leave_it_room(self):
+        session = AriaSession(ChordModel(), clock=self.clock, chord=4, solo_chord=1, space=20, min_step=10)
+        session.hear(0.0, 0.3, 60, 80)
+        comping = [session.play()[0] for _ in range(12)]   # the clock stays by your note: you are playing
+        self.clock.t = 5.0                                  # you rest
+        alone = [session.play()[0] for _ in range(12)]
+        for onsets, most in ((comping, 4), (alone, 1)):
+            groups = []   # onsets within CHORD of the first make one chord
+            for onset in onsets:
+                if groups and onset - groups[-1][0] <= aria_duo.CHORD / 100 + 1e-9:
+                    groups[-1].append(onset)
+                else:
+                    groups.append([onset])
+            self.assertEqual(max(len(group) for group in groups), most)
+        self.assertEqual(session.state()['mode'], 'alone')
+        self.assertIn('solo_chord', session.state()['active'])
+        self.assertNotIn('chord', session.state()['active'])
 
     def test_it_plays_only_in_the_octaves_it_is_given(self):
         self.session.turn(lowest=5, highest=4)

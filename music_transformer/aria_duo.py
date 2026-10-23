@@ -42,7 +42,8 @@ SPLIT = 60        # under middle C a note is its left hand's (for the client's d
 KNOBS = {
     'min_step': (0, 0, 60, 'ticks', "time between its onsets when you rest"),
     'space': (15, 0, 150, 'ticks', "time between its onsets while you play"),
-    'chord': (5, 1, 8, 'notes', "most notes it starts at once"),
+    'chord': (5, 1, 8, 'notes', "most notes it starts at once while you play: its comping"),
+    'solo_chord': (2, 1, 8, 'notes', "most notes it starts at once when you leave it room: lines and arpeggios"),
     'out_of_key': (0.5, 0.0, 6.0, '', "how strongly it keeps to your key"),
     'chord_tone': (0.5, 0.0, 4.0, '', "how much it leans on the chord you play"),
     'tension': (0.5, 0.0, 4.0, '', "how much it colours your chord with its 9th, 11th and 13th"),
@@ -55,9 +56,8 @@ KNOBS = {
     'lowest': (0, 0, 8, 'octave_from', "the lowest octave it may play"),
     'highest': (8, 0, 8, 'octave_to', "the highest octave it may play"),
 }
-IN_EFFECT = {'listening': set(), 'accompanying': {'space', 'under'}, 'alone': {'min_step'}}
-ALWAYS = {'chord', 'out_of_key', 'chord_tone', 'tension', 'stay', 'max_rest', 'temperature', 'min_p',
-          'lowest', 'highest'}
+IN_EFFECT = {'listening': set(), 'accompanying': {'space', 'under', 'chord'}, 'alone': {'min_step', 'solo_chord'}}
+ALWAYS = {'out_of_key', 'chord_tone', 'tension', 'stay', 'max_rest', 'temperature', 'min_p', 'lowest', 'highest'}
 
 
 def knob(name, value):
@@ -191,12 +191,12 @@ class AriaSession:
         earliest = max(last, now + MARGIN)
         latest = max(earliest, last + self.max_rest)
         mine = [e for e in self.events if e[1]]
-        step = self.space if you_play else self.min_step
+        step, most = (self.space, self.chord) if you_play else (self.min_step, self.solo_chord)
         gap = None
         if mine:
             group = [e for e in mine if e[0] >= mine[-1][0] - CHORD]   # its last chord
             start = group[0][0]
-            if len(group) >= self.chord:
+            if len(group) >= most:
                 earliest = max(earliest, start + max(step, CHORD + 1))
             elif step > CHORD:
                 gap = (start + CHORD + 1, start + step)               # no onset between its chord and step
