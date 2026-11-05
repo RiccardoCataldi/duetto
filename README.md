@@ -2,9 +2,13 @@
 
 [![tests](https://github.com/RiccardoCataldi/duetto/actions/workflows/tests.yml/badge.svg)](https://github.com/RiccardoCataldi/duetto/actions/workflows/tests.yml) [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE)
 
-https://github.com/user-attachments/assets/41a18857-2421-4c9a-b8b0-83cfdad1ff84
+![You in orange, the model in blue, on the piano roll](samples/duo/duetto.gif)
 
 Play a MIDI keyboard and a transformer plays a second piano with you, in real time. It listens like a partner: your key, the chord you play, your pulse, your phrases. It comps while you play and takes the melody when you rest.
+
+▶ **[Watch a full improvisation on YouTube](https://www.youtube.com/watch?v=0qvRMhN8qa4)**
+
+https://github.com/user-attachments/assets/41a18857-2421-4c9a-b8b0-83cfdad1ff84
 
 The model is the pretrained [Anticipatory Music Transformer](https://github.com/jthickstun/anticipation) (Lakh MIDI), running on a Jetson; the laptop handles MIDI, sound and the piano roll.
 
