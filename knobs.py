@@ -35,6 +35,7 @@ ARROW_W = 30              # a stepper's arrows
 THUMB_R = 7
 DRAG = 220                # pixels of drag across a stepper's whole range
 STEPS = 50                # wheel steps across a knob's range
+PITCH_NAMES = ('C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B')   # a key such as the trigger: C2
 DOUBLE_CLICK_S = 0.35
 STEP_KEYS = {pygame.K_LEFT: -1, pygame.K_DOWN: -1, pygame.K_RIGHT: 1, pygame.K_UP: 1}
 MIND_FILE = os.path.expanduser('~/.config/ai-duet/mind.json')   # the model's knobs as last turned
@@ -79,10 +80,17 @@ PRESETS = [
      {'chord': 1, 'solo_chord': 1, 'hands': 1, 'lowest': 5, 'highest': 7}),
     ('free', "outside your key and off your pulse, surprising and dense: free improvisation together",
      {'harmony': 1.0, 'risk': 1.0, 'groove': 0.0, 'density': 0.75, 'focus': 0.8, 'key follow': 1.0}, {}),
+    # the jam_bot's ways (music_transformer/jam.py): the model left free, started again from your last notes
+    ('trade', "jam_bot: you and it take turns of two bars; in its turn it carries on from your last notes", {},
+     {'strategy': 1}),
+    ('follow me', "jam_bot: a moment after each of your gestures it starts again from your last notes, and leads until "
+                  "the next", {}, {'strategy': 2}),
+    ('on cue', "jam_bot: it plays on by itself; a key under C2 makes it start again from your last notes", {},
+     {'strategy': 3}),
 ]
 PRESET_KNOBS = {name for *_, turns in PRESETS for name in turns}
 MODES = {'listening': 'waiting for you to play', 'accompanying': 'accompanying you', 'answering': 'answering you',
-         'alone': 'playing on its own'}
+         'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn'}
 
 # the sections of the tabs: the model's knobs on the AI mind tab and in Advanced, and each one's sound
 REGISTER = ('lowest', 'highest', 'root', 'scale', 'bpm', 'metronome')
@@ -94,6 +102,7 @@ ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'an
             ('Imagination', ('temperature', 'top_p', 'memory')),
             ('Memory of you', ('recall', 'silence', 'sparse', 'decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic',
                                'itself', 'probabilistic')),
+            ('jam_bot', ('strategy', 'context', 'bars', 'wait', 'lock', 'every', 'trigger')),
             ('Range, key & tempo', REGISTER)]
 SOUND_GROUPS = [('', ('instrument',)), ('Mix', ('volume', 'pan', 'reverb')),
                 ('Envelope', ('attack', 'decay', 'sustain', 'release')), ('Delay', ('echo', 'delay', 'feedback'))]
@@ -125,8 +134,10 @@ class Knob:
             return self.ends[0] if value < 0.4 else self.ends[1] if value > 0.6 else 'balanced'
         if self.unit == 'ticks':
             return f"{value / 100:.2f} s"
-        if self.unit == 'notes':
-            return f"{value} notes"
+        if self.unit in ('notes', 'bars'):
+            return f"{value} {self.unit}"
+        if self.unit == 'pitch':
+            return f"{PITCH_NAMES[value % 12]}{value // 12 - 1}"
         if self.unit == 'program':
             return sound.GM[value]
         if self.unit == 'bpm':

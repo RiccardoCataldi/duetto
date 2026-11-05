@@ -9,6 +9,7 @@ One line per message, times in seconds since the connection opened:
     client -> server   "off <onset> <pitch> <duration>"  the key you pressed at <onset> stopped sounding (pedal and all)
     server -> client   "note <onset> <duration> <pitch> <hand>"   the model's next note, of its left or right hand
     server -> client   "cut <onset>"                     forget the model's notes from <onset> on: they are resampled
+                                                         (or the strategy knob changed: it starts again its new way)
     server -> client   "tempo <bpm> <metronome>"         the tempo it keeps to (0: yours), its beats on k * 60 / bpm,
                                                          and whether to click them (1); at once and whenever turned
 One duo at a time; a second connection waits for the first to close.
@@ -34,6 +35,7 @@ from anticipation.config import TIME_RESOLUTION
 
 from music_transformer.amt import AMTGenerator
 from music_transformer.duo import ALWAYS, KNOBS, LOOKAHEAD, MARGIN, DuoSession, knob
+from music_transformer.jam import STRATEGIES, JamSession
 from music_transformer.memory import midi_files
 
 STATE_S = 0.25    # how often a knobs connection hears what the duo is doing
@@ -79,6 +81,8 @@ def make_handler(generator, left=None, corpus=()):
                             session.turn(**{name: knobs[name]})
                             if name in ('bpm', 'metronome'):
                                 inbox.put(('tempo',))
+                            if name == 'strategy':
+                                inbox.put(('swap',))
                         print(f"duo: {name} = {knobs[name]}")
             except (ConnectionResetError, ValueError) as e:
                 print(f"duo: bad knob ({e})")
@@ -103,7 +107,13 @@ def make_handler(generator, left=None, corpus=()):
                 inbox = queue.Queue()
                 threading.Thread(target=self.read, args=(inbox, first), daemon=True).start()
                 hands = {} if left is None else {'left': left}
-                session = DuoSession(generator.model, generator.device, started=opened, corpus=corpus, **hands, **knobs)
+
+                def begin():   # the duo's way, or one of the jam_bot's
+                    if knobs['strategy']:
+                        return JamSession(generator.model, generator.device, started=opened, **knobs)
+                    return DuoSession(generator.model, generator.device, started=opened, corpus=corpus, **hands, **knobs)
+
+                session = begin()
                 heard, played, shown = 0, 0, None
                 sampling, answers, since = [], [], None   # seconds to sample each note; from your note to its next
                 playing.append((session, inbox))
@@ -120,6 +130,12 @@ def make_handler(generator, left=None, corpus=()):
                             break
                         if note and note[0] == 'tempo':
                             self.wfile.write(f"tempo {session.bpm} {session.metronome}\n".encode())
+                        elif note and note[0] == 'swap':
+                            playing.remove((session, inbox))
+                            session = begin()
+                            playing.append((session, inbox))
+                            self.wfile.write(f"cut {time.monotonic() - opened:.3f}\n".encode())
+                            print(f"duo: its way is now {STRATEGIES[knobs['strategy']]}")
                         elif note and note[0] == 'off':
                             session.release(*note[1:])
                         elif note:
@@ -136,6 +152,9 @@ def make_handler(generator, left=None, corpus=()):
                         elif session.ahead() < LOOKAHEAD:
                             begun = time.perf_counter()
                             sampled = session.play()
+                            cut = session.recut()
+                            if cut is not None:
+                                self.wfile.write(f"cut {cut:.3f}\n".encode())
                             if sampled:
                                 onset, duration, pitch, hand = sampled
                                 self.wfile.write(f"note {onset:.3f} {duration:.3f} {pitch} {hand}\n".encode())

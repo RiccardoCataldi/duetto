@@ -52,7 +52,7 @@ No MIDI keyboard? A virtual one works: `sudo apt install vmpk`, open it, and pic
 
 - **Jetson** (Orin Nano, JetPack 6): the repo in `~/Ai-Duet` with a venv made with `--system-site-packages` (NVIDIA's torch), the model as safetensors in `~/models/music-medium-800k`, power mode MAXN_SUPER, and `ssh jetson` working with a key. Then once `ssh -t jetson sudo bash Ai-Duet/jetson_setup.sh`: it lets `run_duet.sh` max the clocks, and frees the memory the model needs by running without a desktop and turning off the services the duo does not use (the script says how to undo it).
 - **Laptop**: FluidSynth with FluidR3_GM, and a venv with `pip install mido python-rtmidi pygame imageio-ffmpeg`. A sampled grand at `~/sf2/SalamanderGrandPiano.sf2` ([Salamander Grand Piano](https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html), or another with `SOUNDFONT=path/to.sf2 ./run_duet.sh`) plays the piano over FluidR3_GM's.
-- **Code changes**: `./run_duet.sh` copies `music_transformer/`, `tests/` and `jetson_setup.sh` to the Jetson. The model's tests need torch: run `python -m unittest tests.test_duo_session tests.test_graphed` there.
+- **Code changes**: `./run_duet.sh` copies `music_transformer/`, `tests/` and `jetson_setup.sh` to the Jetson. The model's tests need torch: run `python -m unittest tests.test_duo_session tests.test_jam tests.test_graphed` there.
 - **Speed**: on CUDA the model feeds each token through a CUDA graph ([music_transformer/graphed.py](music_transformer/graphed.py)), the same GPT-2 about three times sooner than in eager mode.
 - **Logs**: `~/amt_server.log` on the Jetson; `duet.log`, `fluidsynth.log`, `pianoroll.log` in `/tmp` on the laptop.
 
@@ -67,7 +67,7 @@ The top of the piano roll says what the model hears (key, chord, tempo) and what
 Controls are sliders (drag them; hold Shift to drag finely) and steppers (click the arrows). The arrow keys or Ctrl and the wheel over a control turn it; the wheel alone scrolls the panel. A double click resets a control, and the bottom of the panel says what the control under the mouse does. A control is dimmed while what it shapes is not happening.
 
 - **AI mind**
-  - Presets: **duet**, **call & response**, **it comps** (it plays the harmony, you improvise), **it solos** (you play the harmony, it improvises), **free**
+  - Presets: **duet**, **call & response**, **it comps** (it plays the harmony, you improvise), **it solos** (you play the harmony, it improvises), **free**; and the ways of MIT's [jam_bot](https://zenodo.org/records/17811478), the model left free and started again from your last notes: **trade** (you take turns of two bars), **follow me** (after each of your gestures), **on cue** (when you play a key under C2), in [music_transformer/jam.py](music_transformer/jam.py)
   - Musical controls: density, harmony, role, dialogue, groove, risk, focus, memory, key follow
   - Range: `lowest`, `highest` octave
   - Scale: `root` and `scale` force it into a scale (C major, D harmonic minor, F minor pentatonic...) instead of your key

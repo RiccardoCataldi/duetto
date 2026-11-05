@@ -118,6 +118,15 @@ KNOBS = {
               "the scale it keeps to: your key as it hears it, or one you force it into"),
     'bpm': (0, 0, 240, 'bpm', "the tempo it keeps to, its beats on the metronome's: yours as it hears it, or one you fix"),
     'metronome': (0, 0, 1, 'choice:off/on', "a click on each beat of the tempo you fix"),
+    # the jam_bot's ways (jam.py): it starts again from your last notes when its strategy says, and plays on freely
+    'strategy': (0, 0, 3, 'choice:duo/trade/gesture/request',
+                 "the duo's own way, or the jam_bot's: taking turns, starting again after each of your gestures, or when you cue it"),
+    'context': (50, 10, 200, 'notes', "jam_bot: how many of the last notes it starts again from"),
+    'bars': (2, 1, 8, 'bars', "trade: the bars each of you plays in turn"),
+    'wait': (10, 0, 150, 'ticks', "gesture: how long after your last note it starts again from it (longer: it waits for a held note)"),
+    'lock': (0, 0, 1, 'choice:off/on', "gesture: your last gesture held ahead of it over and over, for it to follow strictly"),
+    'every': (50, 10, 200, 'ticks', "gesture, locked: how often your last gesture is held again"),
+    'trigger': (36, 21, 60, 'pitch', "request: your keys under this one cue it to start again from your last notes"),
 }
 RECALLED = ('decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic', 'itself', 'probabilistic')   # memory.py's
 # what it is doing, and the knobs that shape its notes then; the others wait for their moment
@@ -128,7 +137,8 @@ IN_EFFECT = {
     'alone': {'min_step', 'solo_chord', 'lead', 'answer', 'timeout'},   # you rest, and it has answered
 }
 ALWAYS = {'out_of_key', 'chord_tone', 'tension', 'stay', 'no_repeat', 'memory', 'max_rest', 'temperature', 'top_p',
-          'lowest', 'highest', 'hands', 'scale', 'bpm', 'phrase', 'breath', 'recall', 'silence', 'sparse', *RECALLED}
+          'lowest', 'highest', 'hands', 'scale', 'bpm', 'phrase', 'breath', 'recall', 'silence', 'sparse', 'strategy',
+          *RECALLED}
 
 
 def knob(name, value):
@@ -203,6 +213,10 @@ class DuoSession:
         """The lowest and highest pitch it may play, from C of its lowest octave to B of its highest (C4 = 60)."""
         low, high = sorted((self.lowest, self.highest))
         return 12 * (low + 1), min(12 * (high + 1) + 11, MAX_PITCH - 1)
+
+    def recut(self):
+        """Its notes already sent are dropped only when you play (hear() says from when): never after play()."""
+        return None
 
     def knobs(self):
         return {name: getattr(self, name) for name in KNOBS}
