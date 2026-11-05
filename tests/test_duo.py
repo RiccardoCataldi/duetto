@@ -100,7 +100,7 @@ class DuoTest(unittest.TestCase):
 
     def test_it_plays_louder_when_you_do(self):
         levels = []
-        for loud in (40, 120):
+        for loud in (80, 127):
             out = Out()
             duo = main.Duo(self.sent.append, out, started=100.0, rng=random.Random(0))
             for i in range(6):
@@ -109,6 +109,10 @@ class DuoTest(unittest.TestCase):
             duo.tick(105.0)
             levels.append([m[2] for m, generated in out.messages if generated][0])
         self.assertGreater(levels[1], levels[0] + 30)
+
+    def test_it_does_not_follow_a_soft_keyboard_into_a_whisper(self):
+        soft = main.dynamics(60, 'right', [60], [], 30, False, random.Random(0))
+        self.assertEqual(soft, main.dynamics(60, 'right', [60], [], main.QUIETEST, False, random.Random(0)))
 
     def test_it_strikes_its_keys_as_hard_as_the_model_says_when_it_says(self):
         self.duo.receive("note 2.000 0.500 60 right 110\n")

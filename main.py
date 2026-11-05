@@ -27,6 +27,7 @@ RING = 1.6               # its notes ring this much longer than the model wrote 
 RING_S = 0.4             # and at least this many seconds more
 # its dynamics, shaped as a pianist shapes them; it follows how loud you play (LEVEL: how much your last note counts)
 LEVEL = 0.3
+QUIETEST = 80            # the softest it follows you down to: some keyboards never send more than 70
 SOFTER = 0.8             # it plays a little softer than you
 ACCOMPANY = 0.85         # and softer still while you play
 LEFT_HAND = 0.85         # its left hand under its right
@@ -44,7 +45,7 @@ BAR = 4
 def dynamics(pitch, hand, together, line, level, accompanying, rng=random):
     """The velocity of one of the model's notes. `together`: the pitches its right hand starts with it,
     `line`: its right hand's last pitches, `level`: how loud you play, `accompanying`: whether you are playing."""
-    velocity = level * SOFTER * (ACCOMPANY if accompanying else 1)
+    velocity = max(level, QUIETEST) * SOFTER * (ACCOMPANY if accompanying else 1)
     if hand == 'left':
         velocity *= LEFT_HAND
     elif len(together) > 1:
