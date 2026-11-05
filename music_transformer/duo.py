@@ -324,9 +324,10 @@ class DuoSession:
         return self._played()
 
     def _step(self, now, last, you_play):
-        """What its memory says comes next: its next slice into the plan, or a rest; `free` when it says nothing."""
+        """What its memory says comes next: its next slice into the plan, or a rest; `free` when it says nothing.
+        It turns to its memory at a share of its steps as large as recall is of EXACT, and invents at the others."""
         self.free = True
-        if not self.recall:
+        if not self.recall or (not self.sparse and random.random() >= self.recall / EXACT):
             return
         self.mind.update(self._seconds(now))
         at = self._seconds(max(now + MARGIN, last, self._tick(self.cursor)))
@@ -336,7 +337,8 @@ class DuoSession:
         if event is None or (self.sparse and not event[2]):
             return
         slice_, shift, _ = event
-        self.free, self.cursor = False, at + self.mind.duration(slice_)
+        # a rest it remembers lasts no longer than one it would leave on its own
+        self.free, self.cursor = False, at + min(self.mind.duration(slice_), self.max_rest / TIME_RESOLUTION)
         if random.random() < self.silence:
             return
         low, high = self.octaves()

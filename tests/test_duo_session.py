@@ -211,6 +211,24 @@ class DuoSessionTest(unittest.TestCase):
         self.assertIsNone(session.play())
         self.assertGreaterEqual(session.ahead(), duo.LOOKAHEAD)
 
+    def test_with_little_recall_it_mostly_invents(self):
+        session = self.remembered()
+        session.turn(recall=1.0)
+        with unittest.mock.patch('music_transformer.duo.random.random', return_value=0.5):
+            session.play()
+        self.assertTrue(session.free)
+        with unittest.mock.patch('music_transformer.duo.random.random', return_value=0.05):
+            session.plan = []
+            session.play()
+        self.assertFalse(session.free)
+
+    def test_a_rest_it_remembers_lasts_no_longer_than_max_rest(self):
+        session = self.remembered(max_rest=50)
+        for pitch in (71, 69, 65, 62):
+            self.assertEqual(session.play()[2], pitch)
+        gap = session.play()
+        self.assertLess(gap[0] - round(session.spoken[-2], 2), 0.6)
+
     def test_without_recall_it_only_invents(self):
         session = self.remembered()
         session.turn(recall=0)
