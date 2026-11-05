@@ -58,6 +58,8 @@ MACROS = [
      {'temperature': (0.7, 1.0, 1.4), 'top_p': (0.85, 0.98, 1.0)}),
     ('focus', ('on you', 'on itself'), "whose playing it builds on: yours, or its own line too",
      {'memory': (50, 200, 2000)}),
+    ('memory', ('invents', 'remembers'), "how much it builds on what you played, and how often it leaves it out to keep silent",
+     {'recall': (0.0, 4.0, 10.0), 'silence': (0.0, 0.1, 0.4)}),
     ('key follow', ('steady', 'quick'), "how soon it follows you into a new key",
      {'stay': (0.995, 0.97, 0.85)}),
 ]
@@ -90,6 +92,8 @@ ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'an
             ('Texture', ('chord', 'solo_chord', 'hands', 'no_repeat')),
             ('Role & dialogue', ('apart', 'lead', 'echo')),
             ('Imagination', ('temperature', 'top_p', 'memory')),
+            ('Memory of you', ('recall', 'silence', 'sparse', 'decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic',
+                               'itself', 'probabilistic')),
             ('Range, key & tempo', REGISTER)]
 SOUND_GROUPS = [('', ('instrument',)), ('Mix', ('volume', 'pan', 'reverb')),
                 ('Envelope', ('attack', 'decay', 'sustain', 'release')), ('Delay', ('echo', 'delay', 'feedback'))]

@@ -2,6 +2,7 @@
 import os
 import sys
 import unittest
+import unittest.mock
 from types import SimpleNamespace
 
 import torch
@@ -58,7 +59,9 @@ class DuoSessionTest(unittest.TestCase):
 
     def fill(self):
         while self.session.ahead() < duo.LOOKAHEAD:
-            yield self.session.play()
+            note = self.session.play()
+            if note:
+                yield note
 
     def test_the_model_plays_its_own_instrument_after_now_without_long_rests(self):
         self.clock.t = 3.0
@@ -167,6 +170,60 @@ class DuoSessionTest(unittest.TestCase):
         session.turn(commit=40)
         self.clock.t = 0.05
         self.assertAlmostEqual(session.hear(0.05, 0.2, 64), 0.5)
+
+    def remembered(self, **knobs):
+        """A session that has heard a line, a rest, and the line again up to where it should carry on."""
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, harmonic=0, least=0.5, hands=1,
+                             recall=duo.EXACT, **{'silence': 0, **knobs})
+        for i, pitch in enumerate((60, 64, 67, 72, 71, 69, 65, 62)):
+            session.hear(i * 0.5, 0.2, pitch)
+        session.hear(8.0, 0.2, 60)   # a rest of a second, and the rest of the line after it
+        for i, pitch in enumerate((64, 67, 72)):
+            session.hear(8.5 + i * 0.5, 0.2, pitch)
+        for i, pitch in enumerate((60, 64, 67, 72)):
+            session.hear(14.0 + i * 0.5, 0.2, pitch)
+        self.clock.t = 16.0
+        session.mind.update(16.0)
+        return session
+
+    def test_at_full_recall_it_plays_what_it_remembers_with_its_timing(self):
+        session = self.remembered()
+        notes = [session.play() for _ in range(2)]
+        self.assertEqual([n[2] for n in notes], [71, 69])
+        self.assertAlmostEqual(notes[1][0] - notes[0][0], 0.5, delta=0.02)
+
+    def test_a_rest_it_remembers_it_keeps_silent(self):
+        session = self.remembered()
+        for pitch in (71, 69, 65, 62):
+            self.assertEqual(session.play()[2], pitch)
+        gap = session.play()
+        self.assertGreaterEqual(gap[0] - round(session.spoken[-2], 2), 1.0)
+
+    def test_it_samples_nothing_while_a_rest_it_remembers_passes(self):
+        session = self.remembered(silence=0.9)
+        with unittest.mock.patch('music_transformer.duo.random.random', return_value=0.0):
+            self.assertIsNone(session.play())
+        self.assertGreater(session.cursor, 16.0)
+
+    def test_sparse_it_keeps_silent_until_it_remembers(self):
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, sparse=1, hands=1)
+        session.hear(0.0, 0.2, 60)
+        self.assertIsNone(session.play())
+        self.assertGreaterEqual(session.ahead(), duo.LOOKAHEAD)
+
+    def test_without_recall_it_only_invents(self):
+        session = self.remembered()
+        session.turn(recall=0)
+        session.plan = []
+        session.play()
+        self.assertTrue(session.free)
+
+    def test_with_no_timeout_it_answers_each_of_your_notes_and_waits(self):
+        self.session.turn(timeout=0, breath=0)
+        self.session.hear(0.0, 0.3, 60)
+        self.assertLess(self.session.ahead(), duo.LOOKAHEAD)
+        self.session.play()
+        self.assertGreaterEqual(self.session.ahead(), duo.LOOKAHEAD)
 
     def test_when_you_let_go_it_hears_how_long_your_note_really_was(self):
         self.session.hear(0.0, 0.3, 60)
@@ -332,6 +389,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual(self.model.fed, len(self.session.seq) - 1)
 
     def test_the_model_prefers_the_pitch_classes_you_are_playing(self):
+        self.session.turn(silence=0)
         for i, pitch in enumerate((60, 64, 67, 72)):   # C major triad
             self.session.hear(i * 0.2, 0.2, pitch)
         self.clock.t = 0.6
@@ -354,7 +412,7 @@ class DuoSessionTest(unittest.TestCase):
         self.play_scale(c_major, 0.1)
         self.play_scale([p + 3 for p in c_major], self.clock.t)
         pitches = [pitch % 12 for _ in range(4) for _, _, pitch, _ in self.fill()] + \
-                  [self.session.play()[2] % 12 for _ in range(60)]
+                  [note[2] % 12 for note in (self.session.play() for _ in range(60)) if note]
         self.assertGreater(sum(p in (3, 5, 7, 8, 10, 0, 2) for p in pitches) / len(pitches), 0.75)   # 58% by chance
         self.assertLess(sum(p in (4, 11) for p in pitches) / len(pitches), 0.1)   # only in C: A stays possible, as in Bb
 

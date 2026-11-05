@@ -16,6 +16,14 @@ https://github.com/user-attachments/assets/bd7c846d-0ae0-4ff4-a644-22b97c01049c
 
 Above: you play low chords, the model improvises over them (the **it solos** preset). Files in [samples/duo](samples/duo).
 
+## Its memory
+
+What you play becomes a corpus, in the manner of [Somax2](https://github.com/DYCI2/Somax2) (written anew from its published model, in [music_transformer/memory.py](music_transformer/memory.py)). Your notes wake peaks in that corpus, on three layers: your line, your harmony, its own line. Peaks move on with time, fade, and add up when they agree, in any key, and the strongest says what comes next and when. AMT plays it, as closely as `recall` asks: at 0 it only invents, at the top it quotes you. It also knows the harmony it expects next.
+
+Silence comes the same way: the rests you play are in the corpus; `silence` leaves slices out; `timeout` is how long it plays on after your last note; with `sparse` on it plays only when it remembers. With nothing to remember it invents, in phrases of about `phrase` notes with a `breath` between them.
+
+`./run_duet.sh` gives it your saved duos in `generated/` (your track of each); by hand, `python -m music_transformer.server --corpus generated`.
+
 ## Run it
 
 ```bash
@@ -60,7 +68,7 @@ Controls are sliders (drag them; hold Shift to drag finely) and steppers (click 
 
 - **AI mind**
   - Presets: **duet**, **call & response**, **it comps** (it plays the harmony, you improvise), **it solos** (you play the harmony, it improvises), **free**
-  - Musical controls: density, harmony, role, dialogue, groove, risk, focus, key follow
+  - Musical controls: density, harmony, role, dialogue, groove, risk, focus, memory, key follow
   - Range: `lowest`, `highest` octave
   - Scale: `root` and `scale` force it into a scale (C major, D harmonic minor, F minor pentatonic...) instead of your key
   - Tempo: `bpm` fixes its tempo instead of following yours, `metronome` clicks it

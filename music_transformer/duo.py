@@ -10,12 +10,14 @@ import math
 import random
 import time
 
+import numpy as np
 import torch
 from anticipation.config import CONTEXT_SIZE, MAX_DUR, MAX_PITCH, MAX_TIME, TIME_RESOLUTION
 from anticipation.vocab import AUTOREGRESS, DUR_OFFSET, NOTE_OFFSET, TIME_OFFSET
 from anticipation.sample import safe_logits, nucleus
 
 from music_transformer.listener import FORCED, NAMES, STAY, Listener, hands
+from music_transformer.memory import Memory
 
 LOOKAHEAD = 100   # ticks the model plays ahead of now (1 s)
 MARGIN = 15       # ticks: a new note of the model sounds no earlier than this, to cover sampling and the network
@@ -26,6 +28,8 @@ PHRASE = 16       # notes it plays, about, before it takes a breath
 BREATH = 150      # ticks of silence that end a phrase
 TIMEOUT = 1000    # ticks it plays on after your last note; then it is silent until you play
 NEVER = 6000      # a timeout this long: it plays on for good
+SILENCE = 0.1     # chance that it leaves out a slice of its memory and stays silent as long as the slice lasts
+EXACT = 10.0      # recall at this strength: it plays what it remembers note for note
 COMMIT = 50       # ticks ahead of now its plan stands when you play, as long as your note does not contradict it
 # left free, the model plays like a full Lakh MIDI track: dense chords and the same arpeggio over and over.
 # These keep it a pianist: it comps in chords while you play and plays lines when you rest.
@@ -89,6 +93,17 @@ KNOBS = {
     'phrase': (PHRASE, 2, 64, 'notes', "about how many notes it plays before it takes a breath"),
     'breath': (BREATH, 0, LONGEST_REST, 'ticks', "the silence that ends its phrase"),
     'timeout': (TIMEOUT, 0, NEVER, 'ticks', "how long it plays on after your last note; at the top, for good"),
+    'recall': (4.0, 0.0, EXACT, '', "how closely it follows its memory of you; 0: it only invents, at the top: it quotes"),
+    'silence': (SILENCE, 0.0, 0.9, '', "how often it leaves out what it remembers and stays silent instead"),
+    'sparse': (0, 0, 1, 'choice:off/on', "with nothing to remember: on, it keeps silent; off, it invents"),
+    'decay': (30.0, 5.0, 120.0, 's', "how long an idea of where you are lasts unheard"),
+    'least': (1.5, 0.5, 8.0, '', "how sure it must be of where you are before it follows its memory"),
+    'continuity': (1.5, 1.0, 4.0, '', "how much it prefers to carry on along what it is remembering"),
+    'jump': (8, 2, 32, 'slices', "how far along one memory it may go before it must jump"),
+    'melodic': (1.0, 0.0, 3.0, '', "how much your line wakes its memory"),
+    'harmonic': (1.0, 0.0, 3.0, '', "how much your harmony wakes its memory"),
+    'itself': (0.5, 0.0, 3.0, '', "how much its own line wakes its memory"),
+    'probabilistic': (0, 0, 1, 'choice:strongest/by chance', "the memory it follows: always the strongest, or by chance"),
     'commit': (COMMIT, MARGIN, LOOKAHEAD, 'ticks', "how far ahead its plan stands when you play: low, it rethinks at every note"),
     'memory': (MEMORY, 50, 2000, 'ticks', "how much of its own playing it remembers"),
     'max_rest': (MAX_REST, 50, LONGEST_REST, 'ticks', "the longest silence it may leave"),
@@ -104,6 +119,7 @@ KNOBS = {
     'bpm': (0, 0, 240, 'bpm', "the tempo it keeps to, its beats on the metronome's: yours as it hears it, or one you fix"),
     'metronome': (0, 0, 1, 'choice:off/on', "a click on each beat of the tempo you fix"),
 }
+RECALLED = ('decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic', 'itself', 'probabilistic')   # memory.py's
 # what it is doing, and the knobs that shape its notes then; the others wait for their moment
 IN_EFFECT = {
     'listening': set(),
@@ -112,7 +128,7 @@ IN_EFFECT = {
     'alone': {'min_step', 'solo_chord', 'lead', 'answer', 'timeout'},   # you rest, and it has answered
 }
 ALWAYS = {'out_of_key', 'chord_tone', 'tension', 'stay', 'no_repeat', 'memory', 'max_rest', 'temperature', 'top_p',
-          'lowest', 'highest', 'hands', 'scale', 'bpm', 'phrase', 'breath'}
+          'lowest', 'highest', 'hands', 'scale', 'bpm', 'phrase', 'breath', 'recall', 'silence', 'sparse', *RECALLED}
 
 
 def knob(name, value):
@@ -123,12 +139,14 @@ def knob(name, value):
 
 
 class DuoSession:
-    def __init__(self, model, device, you=0, me=4, left=LEFT, clock=time.monotonic, started=None, **knobs):
+    def __init__(self, model, device, you=0, me=4, left=LEFT, clock=time.monotonic, started=None, corpus=(), **knobs):
         self.model, self.device = model, device
         self.you, self.me, self.left = you, me, left   # General MIDI programs: piano; its right and left hands
-        self.listener = Listener()
+        self.listener, self.mind = Listener(), Memory()
+        self.mind.load(corpus)
         for name, (default, *_) in KNOBS.items():
             setattr(self, name, default)
+        self.turn(**{name: getattr(self, name) for name in RECALLED})
         self.turn(**knobs)
         self.heard_at = None           # context time of your last note
         self.clock, self.started = clock, clock() if started is None else started
@@ -136,11 +154,18 @@ class DuoSession:
         self.seq = [AUTOREGRESS]       # complete events in time order, yours and the model's
         self.past, self.fed = None, 0  # the KV cache covers seq[:fed]
         self.spoken = []               # session seconds of its last notes that were not cut
+        self.plan, self.loose = [], 0  # (seconds, pitch, duration) it remembers and has yet to play; ticks its first
+                                       # note may wait for your pulse: it has just jumped
+        self.cursor = 0.0              # session seconds of its next slice: a rest in its memory passes here
+        self.free, self.owed = True, False   # it invents, its memory silent; your note is still to be answered
 
     def turn(self, **knobs):
         """Sets knobs (see KNOBS), kept within their range; they take effect from the model's next note."""
         for name, value in knobs.items():
             setattr(self, name, knob(name, value))
+        for name in RECALLED:
+            if name in knobs:
+                setattr(self.mind, name, getattr(self, name))
         if 'stay' in knobs:
             self.listener.stay(self.stay)
         if 'root' in knobs or 'scale' in knobs:
@@ -187,20 +212,25 @@ class DuoSession:
 
     def ahead(self):
         """Ticks of music already sampled beyond now; the caller samples more while this is under LOOKAHEAD."""
-        now, last = self.now(), max(self._last_time(), self._breath())
-        return LOOKAHEAD + 5 if self._timed_out(max(last, now)) else last - now
+        now, last = self.now(), max(self._last_time(), self._breath(), self._tick(self.cursor))
+        return LOOKAHEAD + 5 if self._timed_out(max(last, now)) and not self.owed else last - now
 
     def hear(self, onset, duration, pitch, velocity=None):
         """Your note, pressed at `onset` (AMT does not hear how hard): the model hears it when you played it, before
         those of its notes already on their way that come after it. Returns the time from which the model's unplayed
         notes are dropped, or None."""
         self.listener.hear(onset, duration, pitch)
+        self.mind.hear(onset, pitch, duration, self._phase(onset))
         tick = round(onset * TIME_RESOLUTION)
         if self.base is None:
             self.base = tick
         self._fit()   # it may have kept silent for longer than a context lasts
+        waited = self.heard_at is None or not self.timeout or self._timed_out(max(self.now(), self._last_time()))
         self.heard_at = max(tick - self.base, 0)
         now, later, cut = self.now(), self._unwind(self.heard_at), None
+        self.owed = True
+        if waited:                     # the trigger: you are what it was waiting for
+            self.cursor = min(self.cursor, self._seconds(now + MARGIN))
         bias = self.listener.bias(self._seconds(now), self.chord_tone, self.tension, self.out_of_key) if later else None
         self.seq += [TIME_OFFSET + self.heard_at, DUR_OFFSET + _duration(duration),
                      NOTE_OFFSET + self.you * MAX_PITCH + pitch]
@@ -213,6 +243,7 @@ class DuoSession:
                 self.seq += event
         if cut is not None:
             self.spoken = [onset for onset in self.spoken if onset < cut]
+            self.plan, self.cursor = [], min(self.cursor, cut)
         # otherwise its own line, two or three times denser than yours, drowns you out
         events = self._events()
         kept = [e for e in events
@@ -225,6 +256,7 @@ class DuoSession:
         """Your note pressed at `onset` stopped sounding after `duration`, the pedal's ring and all: the model hears
         how long it really was from its next note on."""
         self.listener.release(onset, pitch, duration)
+        self.mind.release(onset, pitch, duration)
         if self.base is None:
             return
         time_ = TIME_OFFSET + max(round(onset * TIME_RESOLUTION) - self.base, 0)
@@ -237,10 +269,18 @@ class DuoSession:
 
     @torch.no_grad()
     def play(self):
-        """Samples the model's next note: (onset, duration, pitch, hand) in session seconds, hand 'left' or 'right'."""
+        """Samples the model's next note: (onset, duration, pitch, hand) in session seconds, hand 'left' or 'right';
+        or None when it stays silent."""
         self._fit()
         now, last = self.now(), self._last_time()
         you_play = self.heard_at is not None and now - self.heard_at < PLAYING
+        self.owed = False
+        if not self.plan:
+            self._step(now, last, you_play)
+        if self.plan:
+            return self._remembered(now, last, you_play)
+        if not self.free:
+            return None
         answering = self.heard_at is not None and not you_play and now - self.heard_at < self.answer
         after = max(last, self._breath())
         earliest = max(after, now + MARGIN)
@@ -281,12 +321,76 @@ class DuoSession:
                         mask[first:first + MAX_PITCH] += self._partner(tick, line, (low, high), instrument == self.me)
             token = int(torch.multinomial(torch.softmax(nucleus(logits + mask, self.top_p), -1), 1))
             self.seq.append(token)
+        return self._played()
+
+    def _step(self, now, last, you_play):
+        """What its memory says comes next: its next slice into the plan, or a rest; `free` when it says nothing."""
+        self.free = True
+        if not self.recall:
+            return
+        self.mind.update(self._seconds(now))
+        at = self._seconds(max(now + MARGIN, last, self._tick(self.cursor)))
+        event = self.mind.step(at, self._phase(at))
+        if self.sparse and (event is None or not event[2]):
+            self.free, self.cursor = False, self._seconds(now + LOOKAHEAD + 10)
+        if event is None or (self.sparse and not event[2]):
+            return
+        slice_, shift, _ = event
+        self.free, self.cursor = False, at + self.mind.duration(slice_)
+        if random.random() < self.silence:
+            return
+        low, high = self.octaves()
+        notes = self.mind.notes(slice_, shift)[-((self.chord if you_play else self.solo_chord) + LEFT_CHORD * (self.hands == 2)):]
+        self.plan = [(at, min(max(p, low + (p - low) % 12), high - (high - p) % 12), d) for p, d in notes]
+        self.loose = 0 if self.mind.run else round(self.listener.beat(pulse[0]) * TIME_RESOLUTION) \
+            if (pulse := self.listener.pulse(at)) else 0
+
+    def _remembered(self, now, last, you_play):
+        """The next note of the plan: when its memory says and about what it says, as strictly as `recall`; AMT fills
+        in the rest, and may change a note unless recall is EXACT."""
+        at, pitch, duration = self.plan.pop(0)
+        tick = min(max(self._tick(at), last, now + MARGIN), MAX_TIME - 1)
+        end, self.loose = min(tick + self.loose, MAX_TIME - 1), 0
+        instrument = self.left if self.hands == 2 and pitch < RIGHT_BOTTOM else self.me
+        register, line = self.octaves(), self._my_line(instrument)
+        for slot in range(3):
+            logits = self._logits()
+            mask = torch.full_like(logits, -float('inf'))
+            if slot == 0:
+                mask[TIME_OFFSET + tick:TIME_OFFSET + end + 1] = 0
+                mask = self._on_your_pulse(mask, tick, end, you_play) if end > tick else mask
+            elif slot == 1:
+                length = _duration(duration)
+                mask[DUR_OFFSET + max(length // 2, 1):DUR_OFFSET + min(2 * length, MAX_DUR - 1) + 1] = 0
+            elif self.recall >= EXACT:
+                mask[NOTE_OFFSET + instrument * MAX_PITCH + pitch] = 0
+            else:
+                first = NOTE_OFFSET + instrument * MAX_PITCH
+                mask[first + register[0]:first + register[1] + 1] = 0
+                for note in self._banned(line, tick):
+                    mask[note] = -float('inf')
+                mask[first:first + MAX_PITCH] += self._partner(tick, line, register, instrument == self.me)
+                mask[first + pitch] += self.recall
+            token = int(torch.multinomial(torch.softmax(nucleus(logits + mask, self.top_p), -1), 1))
+            self.seq.append(token)
+        return self._played()
+
+    def _played(self):
+        """The note just sampled, once it has joined what it has said and woken its memory of itself."""
         time_, duration, note = self.seq[-3:]
-        self.spoken = self.spoken[-256:] + [self._seconds(time_ - TIME_OFFSET)]
-        return ((time_ - TIME_OFFSET + self.base) / TIME_RESOLUTION,
-                (duration - DUR_OFFSET) / TIME_RESOLUTION,
-                (note - NOTE_OFFSET) % MAX_PITCH,
-                'left' if self._instrument(note) == self.left else 'right')
+        onset, pitch = self._seconds(time_ - TIME_OFFSET), (note - NOTE_OFFSET) % MAX_PITCH
+        self.spoken = self.spoken[-256:] + [onset]
+        self.cursor = max(self.cursor, onset)
+        self.mind.own(onset, pitch)
+        return onset, (duration - DUR_OFFSET) / TIME_RESOLUTION, pitch, 'left' if self._instrument(note) == self.left else 'right'
+
+    def _tick(self, seconds):
+        return round(seconds * TIME_RESOLUTION) - self.base
+
+    def _phase(self, seconds):
+        """Where `seconds` falls in your beat, 0 to 1; None while your rhythm is unclear."""
+        pulse = self.listener.pulse(seconds)
+        return ((seconds - pulse[1]) / self.listener.beat(pulse[0])) % 1 if pulse else None
 
     def _timed_out(self, tick):
         """Whether it has played on long enough, by `tick`, after your last note."""
@@ -295,7 +399,7 @@ class DuoSession:
     def _breath(self):
         """The tick before which it keeps silent: a breath after its last note, once its phrase has run out of notes.
         Its phrase is its notes since its last silence of a breath; about `phrase` of them, a different number each."""
-        if not self.spoken:
+        if not self.spoken or not self.free:
             return 0
         start, gap = len(self.spoken) - 1, self.breath / TIME_RESOLUTION
         while start > 0 and self.spoken[start] - self.spoken[start - 1] < gap:
@@ -337,7 +441,9 @@ class DuoSession:
         hand): your chord and key; where it plays against you (_register); after your phrase, its answer."""
         at, you_play = self._seconds(tick), tick - self.heard_at < PLAYING
         in_key = self.listener.in_key()
-        bias = torch.tensor(self.listener.bias(at, self.chord_tone, self.tension, self.out_of_key)[:MAX_PITCH],
+        expected = self.mind.expect(at)[0] if self.recall else None   # the harmony it remembers comes next, not yours now
+        bias = torch.tensor(self.listener.bias(at, self.chord_tone, self.tension, self.out_of_key)[:MAX_PITCH]
+                            + (0 if expected is None else self.recall * np.tile(expected, 11)[:MAX_PITCH]),
                             dtype=torch.float) + self._register(tick, you_play, register, right)
         if not you_play and right and line and tick - self.heard_at < self.answer:
             phrase = self.listener.phrase(at)

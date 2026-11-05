@@ -17,7 +17,8 @@ pkill -f "^ssh -N .*-L 8765:localhost:8765"
 sleep 1
 
 # the model's code as it is here: the Jetson does not pull from git
-rsync -a --exclude __pycache__ music_transformer tests jetson_setup.sh "$HOST":Ai-Duet/ || echo "could not copy the code to $HOST"
+mkdir -p generated
+rsync -a --exclude __pycache__ music_transformer tests jetson_setup.sh generated "$HOST":Ai-Duet/ || echo "could not copy the code to $HOST"
 
 # the clocks at their highest (jetson_setup.sh lets this run without a password), then the model's server
 ssh "$HOST" 'if [ -x /usr/bin/jetson_clocks ]; then
@@ -26,7 +27,7 @@ ssh "$HOST" 'if [ -x /usr/bin/jetson_clocks ]; then
   pkill -f "^python -u -m music_transformer\.server"; sleep 2
   cd ~/Ai-Duet || exit 1
   . .venv/bin/activate
-  HF_HUB_OFFLINE=1 setsid nohup python -u -m music_transformer.server '"$SERVER_ARGS"' > ~/amt_server.log 2>&1 < /dev/null &
+  HF_HUB_OFFLINE=1 setsid nohup python -u -m music_transformer.server --corpus generated '"$SERVER_ARGS"' > ~/amt_server.log 2>&1 < /dev/null &
   for i in $(seq 60); do grep -q -E "listening|Traceback" ~/amt_server.log && break; sleep 2; done
   grep -E "listening|Traceback" ~/amt_server.log'
 

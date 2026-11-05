@@ -23,6 +23,7 @@ import argparse
 import itertools
 import json
 import math
+import os
 import queue
 import socketserver
 import statistics
@@ -33,6 +34,7 @@ from anticipation.config import TIME_RESOLUTION
 
 from music_transformer.amt import AMTGenerator
 from music_transformer.duo import ALWAYS, KNOBS, LOOKAHEAD, MARGIN, DuoSession, knob
+from music_transformer.memory import midi_files
 
 STATE_S = 0.25    # how often a knobs connection hears what the duo is doing
 
@@ -46,7 +48,7 @@ def ms(seconds):
     return f"{statistics.median(ordered) * 1000:.0f} ms (95% within {worst * 1000:.0f} ms)"
 
 
-def make_handler(generator, left=None):
+def make_handler(generator, left=None, corpus=()):
     lock = threading.Lock()
     knobs = {name: default for name, (default, *_) in KNOBS.items()}   # as last turned, for this duo and the next
     playing = []                                                         # (session, inbox) of the duo now playing
@@ -101,7 +103,7 @@ def make_handler(generator, left=None):
                 inbox = queue.Queue()
                 threading.Thread(target=self.read, args=(inbox, first), daemon=True).start()
                 hands = {} if left is None else {'left': left}
-                session = DuoSession(generator.model, generator.device, started=opened, **hands, **knobs)
+                session = DuoSession(generator.model, generator.device, started=opened, corpus=corpus, **hands, **knobs)
                 heard, played, shown = 0, 0, None
                 sampling, answers, since = [], [], None   # seconds to sample each note; from your note to its next
                 playing.append((session, inbox))
@@ -133,13 +135,15 @@ def make_handler(generator, left=None):
                                 self.wfile.write(f"cut {cut:.3f}\n".encode())
                         elif session.ahead() < LOOKAHEAD:
                             begun = time.perf_counter()
-                            onset, duration, pitch, hand = session.play()
-                            self.wfile.write(f"note {onset:.3f} {duration:.3f} {pitch} {hand}\n".encode())
-                            sampling.append(time.perf_counter() - begun)
-                            if since:
-                                answers.append(time.perf_counter() - since)
-                                since = None
-                            played += 1
+                            sampled = session.play()
+                            if sampled:
+                                onset, duration, pitch, hand = sampled
+                                self.wfile.write(f"note {onset:.3f} {duration:.3f} {pitch} {hand}\n".encode())
+                                sampling.append(time.perf_counter() - begun)
+                                if since:
+                                    answers.append(time.perf_counter() - since)
+                                    since = None
+                                played += 1
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 finally:
@@ -179,7 +183,10 @@ if __name__ == '__main__':
     parser.add_argument('--model', default=None, help='Hugging Face name or local path of the AMT model')
     parser.add_argument('--left', type=int, default=None,
                         help='the General MIDI program its left hand is in the context (default: duo.LEFT, a bass)')
+    parser.add_argument('--corpus', default=None, help='a folder of MIDI files it remembers: your saved duos')
     args = parser.parse_args()
     generator = AMTGenerator(model_name=args.model)
     print(f"AMT model loaded on {generator.device}, listening on {args.host}:{args.port}")
-    Server((args.host, args.port), make_handler(generator, args.left)).serve_forever()
+    corpus = midi_files(args.corpus) if args.corpus and os.path.isdir(args.corpus) else []
+    print(f"{len(corpus)} MIDI files in its memory")
+    Server((args.host, args.port), make_handler(generator, args.left, corpus)).serve_forever()
