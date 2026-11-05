@@ -74,6 +74,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertLessEqual({hand for *_, hand in notes}, {'left', 'right'})
 
     def test_your_note_drops_only_what_the_model_has_not_played_yet(self):
+        self.session.turn(commit=duo.MARGIN)
         self.session.hear(0.0, 0.3, 60)
         notes = list(self.fill())
         self.clock.t = 0.5
@@ -102,6 +103,71 @@ class DuoSessionTest(unittest.TestCase):
         self.session.play()
         self.assertEqual(self.model.fed, len(self.session.seq) - 1)
 
+    def test_it_takes_a_breath_when_its_phrase_has_run_out_of_notes(self):
+        session = DuoSession(StuckModel(), 'cpu', clock=self.clock, timeout=duo.NEVER, phrase=4, breath=120, hands=1)
+        session.hear(0.0, 0.3, 60)
+        onsets = sorted({session.play()[0] for _ in range(30)})
+        gaps = [b - a for a, b in zip(onsets, onsets[1:])]
+        self.assertGreaterEqual(max(gaps), 1.2)
+        self.assertGreater(sum(gap >= 1.2 for gap in gaps), 2)
+
+    def test_it_samples_nothing_while_it_breathes(self):
+        session = DuoSession(StuckModel(), 'cpu', clock=self.clock, timeout=duo.NEVER, phrase=2, breath=400, hands=1)
+        session.hear(0.0, 0.3, 60)
+        while session._breath() == 0:
+            session.play()
+        self.assertGreaterEqual(session.ahead(), 400 - session.now())
+
+    def test_it_plays_on_after_your_last_note_then_waits_for_you(self):
+        self.session.turn(timeout=200, breath=0)
+        self.session.hear(0.0, 0.3, 60)
+        for _ in range(100):
+            self.clock.t += 0.1
+            notes = list(self.fill())
+            self.assertTrue(all(n[0] <= 2.0 + duo.LOOKAHEAD / 100 + duo.MAX_REST / 100 for n in notes))
+        self.assertEqual(self.session.state()['mode'], 'listening')
+        self.assertEqual(list(self.fill()), [])
+        self.session.hear(self.clock.t, 0.3, 62)
+        self.assertGreater(len(list(self.fill())), 0)
+
+    def test_you_can_come_back_after_a_silence_longer_than_the_context_lasts(self):
+        self.session.hear(0.0, 0.3, 60)
+        list(self.fill())
+        self.clock.t = 500.0
+        self.session.hear(500.0, 0.3, 62)
+        self.assertLess(self.session.seq[-3] - TIME_OFFSET, 10000)
+        self.assertGreater(len(list(self.fill())), 0)
+
+    def planned(self, *pitches):
+        """A session in C major, with its plan after 0.3 s: `pitches`, 0.1 s apart."""
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, commit=100)
+        for i, pitch in enumerate((60, 64, 67, 60, 64, 67, 72, 62, 65, 69, 71) * 3):
+            session.listener.hear(-10.0 + i / 10, 0.1, pitch)
+        session.hear(0.0, 0.2, 60)
+        session.seq += [token for i, pitch in enumerate(pitches) for token in
+                        (TIME_OFFSET + 30 + 10 * i, DUR_OFFSET + 10, NOTE_OFFSET + 4 * MAX_PITCH + pitch)]
+        session.spoken = [0.3 + i / 10 for i in range(len(pitches))]
+        return session
+
+    def test_its_plan_stands_when_your_note_does_not_contradict_it(self):
+        session = self.planned(72, 74, 76)
+        self.clock.t = 0.05
+        self.assertIsNone(session.hear(0.05, 0.2, 64))
+        self.assertEqual(len(session._events()), 5)
+
+    def test_your_note_drops_its_plan_from_the_note_that_contradicts_it(self):
+        session = self.planned(72, 73, 76)     # Db in C major
+        self.clock.t = 0.05
+        self.assertAlmostEqual(session.hear(0.05, 0.2, 64), 0.4)
+        self.assertEqual(session.spoken, [0.3])
+        self.assertEqual(len(session._events()), 3)
+
+    def test_its_plan_does_not_stand_past_commit(self):
+        session = self.planned(72, 74, 76)
+        session.turn(commit=40)
+        self.clock.t = 0.05
+        self.assertAlmostEqual(session.hear(0.05, 0.2, 64), 0.5)
+
     def test_when_you_let_go_it_hears_how_long_your_note_really_was(self):
         self.session.hear(0.0, 0.3, 60)
         list(self.fill())
@@ -113,6 +179,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual(self.model.fed, len(self.session.seq) - 1)
 
     def test_a_full_context_is_trimmed_and_restarts_at_time_zero(self):
+        self.session.turn(timeout=duo.NEVER)
         self.session.hear(0.0, 0.3, 60)
         longest = 0
         for _ in range(2000):
@@ -260,7 +327,7 @@ class DuoSessionTest(unittest.TestCase):
         yours = [e[2] - NOTE_OFFSET for e in self.session._events() if self.session._instrument(e[2]) == self.session.you]
         self.assertEqual(yours, [60, 62])
         self.assertEqual(self.session.seq[1], TIME_OFFSET)
-        self.assertGreaterEqual(min(mine), self.session.heard_at - duo.MEMORY)
+        self.assertLessEqual(sum(t < self.session.heard_at - duo.MEMORY for t in mine), duo.PRUNE)
         self.session.play()
         self.assertEqual(self.model.fed, len(self.session.seq) - 1)
 

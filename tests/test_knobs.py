@@ -18,7 +18,7 @@ class MindTest(unittest.TestCase):
             self.sent.append(knob)
             self.mind.send(knob)
 
-        for name, (low, high, default) in {'min_step': (5, 60, 20), 'space': (10, 150, 50),
+        for name, (low, high, default) in {'min_step': (5, 60, 20), 'space': (10, 150, 50), 'left_step': (10, 200, 40),
                                            'apart': (0.0, 6.0, 2.0), 'lead': (0.0, 6.0, 3.0),
                                            'echo': (0.0, 6.0, 3.0)}.items():
             self.mind.knobs[name] = knobs.Knob(name, default, low, high, default, '', '', isinstance(low, int),
@@ -37,7 +37,8 @@ class MindTest(unittest.TestCase):
         self.macro('density').set(1.0)
         self.assertEqual((self.mind.knobs['min_step'].value, self.mind.knobs['space'].value), (8, 15))
         self.assertEqual(self.macro('density').shown(), 'dense')
-        self.assertEqual({k.name for k in self.sent}, {'min_step', 'space'})
+        self.assertEqual(self.mind.knobs['left_step'].value, 15)
+        self.assertEqual({k.name for k in self.sent}, {'min_step', 'space', 'left_step'})
 
     def test_a_knob_is_dimmed_while_what_it_shapes_is_not_happening(self):
         self.mind.state = {'mode': 'accompanying', 'key': 'C major', 'chord': 'G7', 'bpm': 92,

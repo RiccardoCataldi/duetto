@@ -43,7 +43,8 @@ MIND_FILE = os.path.expanduser('~/.config/ai-duet/mind.json')   # the model's kn
 # the middle is the duo's default
 MACROS = [
     ('density', ('sparse', 'dense'), "how many notes it plays",
-     {'min_step': (60, 20, 8), 'space': (150, 50, 15), 'max_rest': (500, 200, 100)}),
+     {'min_step': (60, 20, 8), 'space': (150, 50, 15), 'max_rest': (500, 200, 100), 'left_step': (120, 40, 15),
+      'phrase': (6, 16, 40), 'breath': (300, 150, 50)}),
     ('harmony', ('inside', 'outside'), "how far it strays from your key, and how it colours the chord you play",
      {'out_of_key': (5.0, 2.0, 0.0), 'chord_tone': (3.0, 1.0, 0.0), 'tension': (0.0, 1.0, 3.0)}),
     ('role', ('accompanies', 'leads'), "while you play: it keeps apart from your hands and under your melody, or goes "
@@ -63,14 +64,14 @@ MACROS = [
 # ways to play together: name, what it does, its musical controls (0 to 1; one left out stands in the middle) and the
 # model's knobs it sets (one any other preset sets and it leaves out goes back to its default)
 PRESETS = [
-    ('duet', "the duo's defaults: it comps while you play, answers your phrases and plays on when you rest", {}, {}),
+    ('duet', "the duo's defaults: it comps while you play, answers your phrases, breathes and plays on for a while when you rest", {}, {}),
     ('call & response', "it keeps quiet while you play, then answers each phrase at once with a run built on your "
                         "intervals, and takes the melody",
      {'dialogue': 1.0, 'role': 0.75, 'density': 0.9, 'risk': 0.65, 'focus': 0.6},
      {'space': 150, 'chord': 1, 'hands': 1, 'echo': 3.0, 'run': 30}),
     ('it comps', "it plays the harmony, low and steady with both hands, and keeps comping when you rest: you improvise",
      {'role': 0.0, 'dialogue': 0.0, 'density': 0.4, 'harmony': 0.4, 'groove': 1.0, 'risk': 0.3, 'key follow': 0.3},
-     {'chord': 4, 'solo_chord': 4, 'hands': 2, 'lowest': 2, 'highest': 4}),
+     {'chord': 4, 'solo_chord': 4, 'hands': 2, 'lowest': 2, 'highest': 4, 'timeout': 6000}),
     ('it solos', "you play the harmony, it improvises a line over it, up high",
      {'role': 0.85, 'dialogue': 0.3, 'density': 0.8, 'harmony': 0.6, 'groove': 0.7, 'risk': 0.75, 'focus': 0.8},
      {'chord': 1, 'solo_chord': 1, 'hands': 1, 'lowest': 5, 'highest': 7}),
@@ -83,7 +84,8 @@ MODES = {'listening': 'waiting for you to play', 'accompanying': 'accompanying y
 
 # the sections of the tabs: the model's knobs on the AI mind tab and in Advanced, and each one's sound
 REGISTER = ('lowest', 'highest', 'root', 'scale', 'bpm', 'metronome')
-ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'answer', 'grid')),
+ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'answer', 'grid', 'phrase', 'breath', 'timeout',
+                         'commit')),
             ('Harmony', ('out_of_key', 'chord_tone', 'tension', 'stay')),
             ('Texture', ('chord', 'solo_chord', 'hands', 'no_repeat')),
             ('Role & dialogue', ('apart', 'lead', 'echo')),
