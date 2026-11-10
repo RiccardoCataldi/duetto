@@ -75,7 +75,10 @@ class DuoSessionTest(unittest.TestCase):
         notes = list(self.fill())
         self.assertGreater(len(notes), 0)
         self.assertGreaterEqual(min(n[0] for n in notes), 4.0 - 0.03)   # none in the count-in
-        self.session.hear(3.3, 0.3, 60)                     # and you join when you like
+        for _ in range(60):                                 # it plays on by itself, its memory of you still empty
+            self.clock.t += 0.1
+            list(self.fill())
+        self.session.hear(self.clock.t, 0.3, 60)            # and you join when you like
         self.assertGreaterEqual(self.session.heard_at, 0)
         duet = DuoSession(self.model, 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'))
         duet.begin()

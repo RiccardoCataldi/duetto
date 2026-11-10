@@ -468,7 +468,8 @@ class DuoSession:
         if not (self.chart and self._instrument(note) == self.left):   # its walking bass is no part of its phrases
             self.spoken = self.spoken[-256:] + [onset]
         self.cursor = max(self.cursor, onset)
-        self.mind.own(onset, pitch)
+        if not self.chart:   # over a tune it does not recall: it plays the changes
+            self.mind.own(onset, pitch)
         return onset, (duration - DUR_OFFSET) / TIME_RESOLUTION, pitch, 'left' if self._instrument(note) == self.left else 'right'
 
     def _tick(self, seconds):
