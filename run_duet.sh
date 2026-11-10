@@ -2,6 +2,7 @@
 # Restart the duet: the model's server on the Jetson (or another machine), SSH tunnel, FluidSynth, main.py and the
 # piano roll on the laptop. On another ssh host, with the left hand on a piano in the context, for example:
 #   DUET_HOST=pc SERVER_ARGS="--model ~/models/music-medium-800k --left 0" ./run_duet.sh
+#   DUET_HOST=pc SERVER_ARGS="--engine aria --checkpoint ~/models/aria-medium-gen.safetensors" ./run_duet.sh
 cd "$(dirname "$0")"
 LOG=${LOG_DIR:-/tmp}
 HOST=${DUET_HOST:-jetson}                                            # an ssh host with this repo in ~/Ai-Duet

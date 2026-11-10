@@ -77,6 +77,31 @@ Controls are sliders (drag them; hold Shift to drag finely) and steppers (click 
 
 Knobs and sound are kept in `~/.config/ai-duet/`.
 
+## Duo with Aria on a PC with a GPU
+
+[Aria](https://github.com/EleutherAI/aria) (EleutherAI) is a model of expressive solo piano: about 1B parameters, trained on ~60k hours of piano recordings transcribed to MIDI. Where AMT plays one line and leaves the dynamics to `main.py`, Aria plays both its hands and says how hard it strikes each key; it hears your notes and its own as one performance, four hands on one keyboard, and is told the music is jazz (`--genre`). It needs an NVIDIA GPU with ~4 GB free (an RTX 3080 Ti is plenty); the Jetson Orin Nano is too slow for it.
+
+**On the PC, once** (Python 3.11+, the repo in `~/Ai-Duet`, `ssh pc` working from the laptop with a key):
+```bash
+cd ~/Ai-Duet && python3 -m venv .venv && . .venv/bin/activate
+pip install torch safetensors numpy                               # torch with CUDA (driver CUDA 12.8: --index-url https://download.pytorch.org/whl/cu128)
+pip install git+https://github.com/EleutherAI/aria-utils.git
+git clone https://github.com/EleutherAI/aria ~/aria && pip install --no-deps -e ~/aria   # --no-deps: mlx is for Macs
+mkdir -p ~/models && wget -O ~/models/aria-medium-gen.safetensors \
+  https://huggingface.co/loubb/aria-medium-base/resolve/main/model-gen.safetensors
+```
+
+**Every time:** from the laptop,
+```bash
+DUET_HOST=pc SERVER_ARGS="--engine aria --checkpoint ~/models/aria-medium-gen.safetensors" ./run_duet.sh
+```
+Over a VPN, the network's delay adds to the model's: the model plays `LOOKAHEAD` (1 s) ahead and a new note of its sounds no sooner than `MARGIN` (150 ms); if `ping pc` is above ~60 ms or jumps around, raise `MARGIN` in `music_transformer/aria_duo.py` and `LATE_S` in `main.py`. The server log says, when a duo ends, how fast it was: if its first note after yours goes out well within `MARGIN`, `MARGIN` can come down and it answers you sooner.
+
+**Its knobs** (`KNOBS` in `music_transformer/aria_duo.py`, in the **Advanced** tab): Aria is a pianist already, so they nudge it less than AMT's and there are no rules against loops: `chord` and `solo_chord` (most notes it starts at once while you play, and when you leave it room: low, it plays lines and arpeggios rather than blocks), `space` and `min_step` (time between its onsets while you play and when you rest), `out_of_key`, `chord_tone`, `tension`, `apart` and `lead` (where it plays against you, as a second pianist: while you play it keeps apart from your hands, the keys you played in the last 2 s or that still sound, and, once your top hand reaches C5, from over your melody, so it comps between your hands or under them, less firmly when that leaves it under 12 free keys; when you rest it takes the melody, up from an octave under the middle of your right hand, C5 to G5; neither changes how much it plays, only where; `role` turns both), `grid` (at its highest, 20, its own expressive timing), `max_rest`, and what makes it a partner in a jam: `phrase` and `breath` (it plays in phrases of about so many notes or chords and breathes between them), `commit` (how far ahead its plan stands when you play, unless your note puts it out of your key), `follow` (it plays as loud as you do, a little under you while you play), `answer` and `echo` (when your phrase ends it answers it with your intervals; `dialogue` turns them and `follow`), `timeout` (it stops a while after you do, and waits for you), `root`, `scale`, `bpm` and `metronome` as with AMT, `temperature` and `min_p` (how adventurous, as Aria's authors sample it), `lowest` and `highest`. The **AI mind** controls turn those it has.
+
+**Its tests** need torch and aria-utils, not the model: `python -m unittest tests.test_aria_duo tests.test_server`.
+
+
 ## License
 
 [PolyForm Noncommercial 1.0.0](LICENSE): use it, change it and share it freely for anything noncommercial (personal, study, research, education, hobby). Commercial use is not allowed. The model itself is the [Anticipatory Music Transformer](https://github.com/jthickstun/anticipation), under its own license.

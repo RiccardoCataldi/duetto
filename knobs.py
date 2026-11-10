@@ -89,6 +89,15 @@ PRESETS = [
      {'strategy': 3}),
 ]
 PRESET_KNOBS = {name for *_, turns in PRESETS for name in turns}
+# the same controls for Aria (music_transformer/aria_duo.py), whose knobs have other defaults and ranges
+ENGINE_TURNS = {'aria': {
+    'density': {'min_step': (40, 0, 0), 'space': (100, 15, 0), 'max_rest': (600, 300, 100), 'phrase': (5, 12, 32),
+                'breath': (300, 150, 50)},
+    'harmony': {'out_of_key': (3.0, 0.5, 0.0), 'chord_tone': (2.0, 0.5, 0.0), 'tension': (0.0, 0.5, 2.0)},
+    'dialogue': {'answer': (0, 400, 1000), 'echo': (0.0, 1.5, 4.0), 'follow': (0.0, 1.0, 3.0)},
+    'groove': {'grid': (20, 20, 3)},
+    'risk': {'temperature': (0.7, 0.95, 1.3), 'min_p': (0.1, 0.035, 0.0)},
+}}
 MODES = {'listening': 'waiting for you to play', 'accompanying': 'accompanying you', 'answering': 'answering you',
          'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn'}
 
@@ -98,8 +107,8 @@ ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'an
                          'commit')),
             ('Harmony', ('out_of_key', 'chord_tone', 'tension', 'stay')),
             ('Texture', ('chord', 'solo_chord', 'hands', 'no_repeat')),
-            ('Role & dialogue', ('apart', 'lead', 'echo')),
-            ('Imagination', ('temperature', 'top_p', 'memory')),
+            ('Role & dialogue', ('apart', 'lead', 'echo', 'follow')),
+            ('Imagination', ('temperature', 'top_p', 'min_p', 'memory')),
             ('Memory of you', ('recall', 'silence', 'sparse', 'decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic',
                                'itself', 'probabilistic')),
             ('jam_bot', ('strategy', 'context', 'bars', 'wait', 'lock', 'every', 'trigger')),
@@ -182,6 +191,7 @@ class Mind:
     def __init__(self, address, path=MIND_FILE):
         self.address, self.path = address, path
         self.knobs = {}           # name -> Knob, once connected
+        self.engine = 'amt'       # the model the server plays: each keeps its own knobs
         self.state = None         # the last DuoSession.state() heard
         self.sock = None
         self.lock = threading.Lock()
@@ -190,11 +200,9 @@ class Mind:
                 self.saved = json.load(f)
         except (OSError, ValueError):
             self.saved = {}
-        self.saved.setdefault('knobs', {})
-        self.saved.setdefault('macros', {})
-        self.macros = [Knob(label, self.saved['macros'].get(label, 0.5), 0, 1, 0.5, 'macro', what, False,
-                            self._macro, ends) for label, ends, what, _ in MACROS]
-        self.turns = {label: turns for label, _, _, turns in MACROS}
+        self.macros = [Knob(label, 0.5, 0, 1, 0.5, 'macro', what, False, self._macro, ends)
+                       for label, ends, what, _ in MACROS]
+        self._play('amt')
         if address:
             threading.Thread(target=self._connect, daemon=True).start()
 
@@ -209,6 +217,9 @@ class Mind:
                 for line in lines:
                     if line.strip() == 'ready':
                         break
+                    if line.startswith('engine '):
+                        self._play(line.split()[1])
+                        continue
                     _, name, value, low, high, default, unit, what = line.split(maxsplit=7)
                     knobs[name] = Knob(name, value, low, high, default, unit.strip('-'), what.strip(),
                                        '.' not in default, self.send)
@@ -227,7 +238,7 @@ class Mind:
 
     def _restore(self, knobs):
         """Gives the server back its knobs as you left them; one you never turned starts where its control stands."""
-        saved = self.saved['knobs']
+        saved = self._saved('knobs')
         for name, knob in knobs.items():
             if name in saved:
                 knob.value = saved[name]
@@ -249,14 +260,14 @@ class Mind:
         except OSError:
             return
         if keep:
-            self.saved['knobs'][knob.name] = knob.value
+            self._saved('knobs')[knob.name] = knob.value
             self._save()
 
     def _macro(self, macro):
         for name, anchors in self.turns[macro.name].items():
             if name in self.knobs:
                 self.knobs[name].set(along(anchors, macro.value))
-        self.saved['macros'][macro.name] = macro.value
+        self._saved('macros')[macro.name] = macro.value
         self._save()
 
     def presets(self):
@@ -264,6 +275,8 @@ class Mind:
         knob it leaves out stands where its control puts it, or at its default."""
         presets = []
         for name, what, macros, turns in PRESETS:
+            if 'strategy' in turns and 'strategy' not in self.knobs:
+                continue   # one of the jam_bot's ways: this model has none
             macros = {m.name: macros.get(m.name, 0.5) for m in self.macros}
             free = {n: along(anchors, macros[m]) for m, knobs in self.turns.items() for n, anchors in knobs.items()}
             presets.append((name, what, macros, {n: turns.get(n, free.get(n, self.knobs[n].default))
@@ -282,6 +295,17 @@ class Mind:
         _, _, macros, turns = preset
         return (all(abs(m.value - macros[m.name]) < 0.01 for m in self.macros) and
                 all(abs(self.knobs[n].value - v) < 0.01 for n, v in turns.items()))
+
+    def _play(self, engine):
+        """The server plays `engine`: its controls, and its knobs and controls as you left them."""
+        self.engine = engine
+        self.turns = {label: ENGINE_TURNS.get(engine, {}).get(label, turns) for label, _, _, turns in MACROS}
+        for macro, (label, *_) in zip(self.macros, MACROS):
+            macro.value = self._saved('macros').get(label, 0.5)
+
+    def _saved(self, what):
+        """What you left turned for this engine: 'knobs' or 'macros' (AMT's under those names, as it always was)."""
+        return self.saved.setdefault(what if self.engine == 'amt' else f"{what}_{self.engine}", {})
 
     def _save(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -370,7 +394,7 @@ class Panel:
         for title, knobs in sections:
             rows.append(('title', title, TITLE_H if title else 12))
             if knobs == 'presets':
-                lines = math.ceil(len(PRESETS) / 2)
+                lines = math.ceil(len(self.mind.presets()) / 2)
                 rows.append(('presets', None, lines * (CARD_H + 8) + 44))
                 continue
             pair = []
@@ -571,7 +595,7 @@ class Panel:
             text(surface, fit(capital(preset[0]), 14, rect.width - 16, playing), 14, TEXT if playing or over else
                  MUTED, rect.center, bold=playing, anchor='center')
             self.targets.append(('preset', preset, rect))
-        lines = math.ceil(len(PRESETS) / 2)
+        lines = math.ceil(len(self.mind.presets()) / 2)
         below = y + lines * (CARD_H + 8) + 2
         if shown is None:
             line = 'Your own mix: pick a style to start again from one'

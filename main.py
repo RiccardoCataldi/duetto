@@ -223,7 +223,7 @@ def connect(address):
     host, port = address.rsplit(':', 1)
     sock = socket.create_connection((host, int(port)))
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    print(f"Playing with the AMT model at {address}")
+    print(f"Playing with the model's server at {address} (its log says which model)")
     return sock, time.monotonic()
 
 
@@ -245,7 +245,7 @@ if __name__ == "__main__":
     def listen():
         for line in sock.makefile('r'):
             duo.receive(line)
-        print("The AMT server closed the duo")
+        print("The model's server closed the duo")
 
     threading.Thread(target=listen, daemon=True).start()
 

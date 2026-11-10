@@ -19,6 +19,7 @@ from anticipation.sample import safe_logits, nucleus
 from music_transformer.listener import FORCED, NAMES, STAY, Listener, hands
 from music_transformer.memory import Memory
 
+NAME = 'amt'
 LOOKAHEAD = 100   # ticks the model plays ahead of now (1 s)
 MARGIN = 15       # ticks: a new note of the model sounds no earlier than this, to cover sampling and the network
 MAX_REST = 200    # ticks: the longest silence the model may leave; it reads long silences as a sparse piece and stops
