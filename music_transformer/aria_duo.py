@@ -6,7 +6,8 @@ Aria hears one piano: your notes and its own are one performance in its context,
 plays both its hands and how hard it strikes each key. As with AMT (duo.py), your notes enter the context the moment
 you press them and the part of its line that has not sounded yet is thrown away and sampled again.
 
-It jams as a partner does: it plays in phrases and breathes between them, keeps the plan it has begun when you play,
+It jams as a partner does: it plays about as much as you do, in phrases with a breath between them, keeps the plan
+it has begun when you play,
 plays as loud as you do, answers your phrase with your intervals when you rest, and stops a while after you do.
 Aria learnt one pianist at a time: with `wait` it takes turns with you instead, playing once you rest and giving way
 as you play again.
@@ -54,6 +55,7 @@ NEVER = 6000      # a timeout this long: it plays on for good
 UNDER = 0.85      # how loud it plays while you play, against you: it accompanies
 LOUDER = 30       # steps of velocity away from yours that cost it one `follow`
 HEARD = 400       # ticks of your playing, up to your last note, that say how loud you play
+BALANCE = 800     # ticks over which it plays about as much as you did, up to your last note
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does.
 # Aria is a pianist already: they nudge it less than AMT's, and it needs no rules against loops or doubled notes.
@@ -71,6 +73,7 @@ KNOBS = {
     'stay': (STAY, 0.80, 0.995, '', "how sure it must be you modulated (lower = sooner)"),
     'max_rest': (300, 50, 800, 'ticks', "the longest silence it may leave"),
     'wait': (0, 0, 300, 'ticks', "how long you rest before it plays: 0, it plays along with you; more, you take turns"),
+    'busy': (2.0, 0.5, 8.0, '', "how many notes or chords it plays for each one of yours; at the top, as many as it likes"),
     'phrase': (12, 2, 64, 'notes', "about how many notes or chords it plays before it takes a breath"),
     'breath': (150, 0, 800, 'ticks', "the silence that ends its phrase"),
     'timeout': (1000, 100, NEVER, 'ticks', "how long it plays on after your last note; at the top, for good"),
@@ -92,7 +95,7 @@ IN_EFFECT = {'listening': set(), 'accompanying': {'space', 'apart', 'chord', 'co
              'answering': {'min_step', 'solo_chord', 'lead', 'answer', 'echo', 'timeout'},
              'alone': {'min_step', 'solo_chord', 'lead', 'answer', 'timeout'}}
 ALWAYS = {'out_of_key', 'chord_tone', 'tension', 'stay', 'max_rest', 'temperature', 'min_p', 'lowest', 'highest',
-          'phrase', 'breath', 'follow', 'scale', 'bpm', 'wait'}
+          'phrase', 'breath', 'follow', 'scale', 'bpm', 'wait', 'busy'}
 
 
 def knob(name, value):
@@ -258,7 +261,8 @@ class AriaSession:
         if mine:
             group = [e for e in mine if e[0] >= mine[-1][0] - CHORD]   # its last chord
             start = group[0][0]
-            step = max(step, self._breath() - start)   # its phrase has run out: it may fill its chord, then it breathes
+            # its phrase has run out, or it has played as much as you: it may fill its chord, then it keeps silent
+            step = max(step, self._breath() - start, self._room(mine) - start)
             if len(group) >= most:
                 earliest = max(earliest, start + max(step, CHORD + 1))
             elif step > CHORD:
@@ -355,6 +359,15 @@ class AriaSession:
         """Whether it has played on long enough, by `tick`, after your last note."""
         return self.timeout < NEVER and tick - self.heard_at >= self.timeout
 
+    def _room(self, mine):
+        """The tick before which it starts no new note or chord: in any BALANCE ticks it plays `busy` of them for each
+        one you played in the BALANCE up to your last note, and one more."""
+        if self.heard_at is None or self.busy >= KNOBS['busy'][2]:
+            return 0
+        yours = _attacks(e[0] for e in self.events if not e[1] and e[0] >= self.heard_at - BALANCE)
+        mine, most = _attacks(e[0] for e in mine), int(self.busy * len(yours)) + 1
+        return mine[-most] + BALANCE if len(mine) >= most else 0
+
     def _breath(self):
         """The tick before which it keeps silent: a breath after its last note, once its phrase has run out. Its
         phrase is its notes since its last silence of a breath, a chord counted once; about `phrase` of them, a
@@ -449,6 +462,15 @@ class AriaSession:
         self.events, self.seq, self.segment, self.fed = [], list(self.prefix), 0, 0
         for tick, *rest in kept:
             self._add((tick - shift, *rest))
+
+
+def _attacks(ticks):
+    """Of `ticks` in order, those that start a note or a chord: more than CHORD after the start of the one before."""
+    starts = []
+    for tick in ticks:
+        if not starts or tick - starts[-1] > CHORD:
+            starts.append(tick)
+    return starts
 
 
 def _velocity(velocity):

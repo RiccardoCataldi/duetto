@@ -92,7 +92,7 @@ PRESET_KNOBS = {name for *_, turns in PRESETS for name in turns}
 # the same controls for Aria (music_transformer/aria_duo.py), whose knobs have other defaults and ranges
 ENGINE_TURNS = {'aria': {
     'density': {'min_step': (40, 0, 0), 'space': (100, 15, 0), 'max_rest': (600, 300, 100), 'phrase': (5, 12, 32),
-                'breath': (300, 150, 50)},
+                'breath': (300, 150, 50), 'busy': (0.5, 2.0, 8.0)},
     'harmony': {'out_of_key': (3.0, 0.5, 0.0), 'chord_tone': (2.0, 0.5, 0.0), 'tension': (0.0, 0.5, 2.0)},
     'dialogue': {'answer': (0, 400, 1000), 'echo': (0.0, 1.5, 4.0), 'follow': (0.0, 1.0, 3.0)},
     'groove': {'grid': (20, 20, 3)},
@@ -106,7 +106,7 @@ REGISTER = ('lowest', 'highest', 'root', 'scale', 'bpm', 'metronome')
 ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'answer', 'grid', 'phrase', 'breath', 'timeout',
                          'commit')),
             ('Harmony', ('out_of_key', 'chord_tone', 'tension', 'stay')),
-            ('Texture', ('chord', 'solo_chord', 'hands', 'no_repeat')),
+            ('Texture', ('chord', 'solo_chord', 'hands', 'no_repeat', 'busy')),
             ('Role & dialogue', ('apart', 'lead', 'echo', 'follow')),
             ('Imagination', ('temperature', 'top_p', 'min_p', 'memory')),
             ('Memory of you', ('recall', 'silence', 'sparse', 'decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic',

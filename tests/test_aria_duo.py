@@ -402,6 +402,16 @@ class AriaSessionTest(unittest.TestCase):
         self.assertTrue(all((pitch - 5) % 12 in aria_duo.FORCED['blues'] for pitch in pitches), pitches)
         self.assertEqual(self.session.state()['bpm'], 120)
 
+    def test_it_plays_about_as_much_as_you_do(self):
+        counts = []
+        for yours in (1, 6):
+            session = AriaSession(StuckModel(), clock=Clock(), busy=1.0, breath=0, chord=1)
+            for i in range(yours):
+                session.hear(i * 0.5, 0.3, 60 + i, 80)
+            onsets = [session.play()[0] for _ in range(40)]
+            counts.append(max(sum(a <= b < a + 8 for b in onsets) for a in onsets))   # in any 8 s
+        self.assertEqual(counts, [2, 7])   # one for each of yours, and one more
+
     def test_with_wait_it_takes_turns_with_you(self):
         self.session.turn(wait=80)
         self.session.hear(0.0, 0.3, 60, 80)
