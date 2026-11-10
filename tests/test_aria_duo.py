@@ -412,6 +412,15 @@ class AriaSessionTest(unittest.TestCase):
             counts.append(max(sum(a <= b < a + 8 for b in onsets) for a in onsets))   # in any 8 s
         self.assertEqual(counts, [2, 7])   # one for each of yours, and one more
 
+    def test_it_moves_on_from_the_keys_it_has_just_played(self):
+        session = AriaSession(PeakedModel(), clock=self.clock, variety=6.0, lowest=4, highest=4)
+        session.hear(0.0, 0.3, 30, 80)
+        self.clock.t = 5.0
+        pitches = [session.play()[2] for _ in range(24)]
+        self.assertLess(pitches.count(62), 8)        # the key the model wants most of all, every time
+        session.turn(variety=0)
+        self.assertGreater([session.play()[2] for _ in range(24)].count(62), 16)
+
     def test_with_wait_it_takes_turns_with_you(self):
         self.session.turn(wait=80)
         self.session.hear(0.0, 0.3, 60, 80)

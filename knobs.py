@@ -96,7 +96,7 @@ ENGINE_TURNS = {'aria': {
     'harmony': {'out_of_key': (3.0, 0.5, 0.0), 'chord_tone': (2.0, 0.5, 0.0), 'tension': (0.0, 0.5, 2.0)},
     'dialogue': {'answer': (0, 400, 1000), 'echo': (0.0, 1.5, 4.0), 'follow': (0.0, 1.0, 3.0)},
     'groove': {'grid': (20, 20, 3)},
-    'risk': {'temperature': (0.7, 0.95, 1.3), 'min_p': (0.1, 0.035, 0.0)},
+    'risk': {'temperature': (0.7, 0.95, 1.3), 'min_p': (0.1, 0.035, 0.0), 'variety': (0.0, 1.5, 4.0)},
 }}
 MODES = {'listening': 'waiting for you to play', 'accompanying': 'accompanying you', 'answering': 'answering you',
          'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn', 'waiting': 'your turn'}

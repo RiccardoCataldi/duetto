@@ -55,6 +55,7 @@ NEVER = 6000      # a timeout this long: it plays on for good
 UNDER = 0.85      # how loud it plays while you play, against you: it accompanies
 LOUDER = 30       # steps of velocity away from yours that cost it one `follow`
 HEARD = 400       # ticks of your playing, up to your last note, that say how loud you play
+RECENTLY = 16     # notes of its own it looks back on, not to play the same keys over and over
 BALANCE = 800     # ticks over which it plays about as much as you did, up to your last note
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does.
@@ -62,7 +63,7 @@ BALANCE = 800     # ticks over which it plays about as much as you did, up to yo
 KNOBS = {
     'min_step': (0, 0, 60, 'ticks', "time between its onsets when you rest"),
     'space': (15, 0, 150, 'ticks', "time between its onsets while you play"),
-    'chord': (5, 1, 8, 'notes', "most notes it starts at once while you play: its comping"),
+    'chord': (3, 1, 8, 'notes', "most notes it starts at once while you play: its comping"),
     'solo_chord': (2, 1, 8, 'notes', "most notes it starts at once when you leave it room: lines and arpeggios"),
     'out_of_key': (0.5, 0.0, 6.0, '', "how strongly it keeps to your key"),
     'chord_tone': (0.5, 0.0, 4.0, '', "how much it leans on the chord you play"),
@@ -73,6 +74,7 @@ KNOBS = {
     'stay': (STAY, 0.80, 0.995, '', "how sure it must be you modulated (lower = sooner)"),
     'max_rest': (300, 50, 800, 'ticks', "the longest silence it may leave"),
     'wait': (0, 0, 300, 'ticks', "how long you rest before it plays: 0, it plays along with you; more, you take turns"),
+    'variety': (1.5, 0.0, 6.0, '', "how much it avoids the keys it has just played: each time it played one costs a quarter of this"),
     'busy': (2.0, 0.5, 8.0, '', "how many notes or chords it plays for each one of yours; at the top, as many as it likes"),
     'phrase': (12, 2, 64, 'notes', "about how many notes or chords it plays before it takes a breath"),
     'breath': (150, 0, 800, 'ticks', "the silence that ends its phrase"),
@@ -95,7 +97,7 @@ IN_EFFECT = {'listening': set(), 'accompanying': {'space', 'apart', 'chord', 'co
              'answering': {'min_step', 'solo_chord', 'lead', 'answer', 'echo', 'timeout'},
              'alone': {'min_step', 'solo_chord', 'lead', 'answer', 'timeout'}}
 ALWAYS = {'out_of_key', 'chord_tone', 'tension', 'stay', 'max_rest', 'temperature', 'min_p', 'lowest', 'highest',
-          'phrase', 'breath', 'follow', 'scale', 'bpm', 'wait', 'busy'}
+          'phrase', 'breath', 'follow', 'scale', 'bpm', 'wait', 'busy', 'variety'}
 
 
 def knob(name, value):
@@ -261,14 +263,17 @@ class AriaSession:
         if mine:
             group = [e for e in mine if e[0] >= mine[-1][0] - CHORD]   # its last chord
             start = group[0][0]
-            # its phrase has run out, or it has played as much as you: it may fill its chord, then it keeps silent
-            step = max(step, self._breath() - start, self._room(mine) - start)
+            # its phrase has run out, or it has played as much as you: it keeps silent, its chord as it stands
+            silent = max(self._breath(), self._room(mine))
+            if silent > start + step:
+                earliest, most = max(earliest, silent), 0
             if len(group) >= most:
                 earliest = max(earliest, start + max(step, CHORD + 1))
             elif step > CHORD:
                 gap = (start + CHORD + 1, start + step)               # no onset between its chord and step
-            latest = max(latest, start + step)
+            latest = max(latest, start + step, earliest)
         onsets = self._onsets(earliest, latest, gap, you_play)
+        closed = range(*gap) if gap else ()   # where it would play if it could: there, it has left its chord
         while self.segment < earliest // SEGMENT:                      # time goes by up to the earliest it may play
             self._push([T])
         # its note, or <T>: it rests on into the next segment
@@ -283,6 +288,9 @@ class AriaSession:
             low, high = self.octaves()
             notes = NOTE_IDS[low:high + 1].to(logits.device)
             bias = self._partner(here[0])[low:high + 1]
+            for e in mine[-RECENTLY:]:
+                if low <= e[2] <= high:   # the keys it has just played, over and over: it moves on
+                    bias[e[2] - low] -= self.variety / 4
             for e in mine:
                 if e[0] >= here[0] - CHORD and low <= e[2] <= high:   # a key it is already striking now
                     bias[e[2] - low] = -float('inf')
@@ -304,8 +312,12 @@ class AriaSession:
         self._push([token])
         logits = self._logits()
         mask = torch.full_like(logits, -float('inf'))
-        mask[ONSET_IDS[[t % SEGMENT for t in here]].to(logits.device)] = 0
+        after = [t for t in here if gap and t >= gap[1]]
+        wished = here + [t for t in closed if t // SEGMENT == self.segment] if after else here
+        mask[ONSET_IDS[[t % SEGMENT for t in wished]].to(logits.device)] = 0
         onset = int((ONSET_IDS.to(logits.device) == self._sample(logits + mask)).nonzero()[0]) + self.segment * SEGMENT
+        if onset in closed:   # not with its chord: at the first tick it may play after it, never piled on the chord
+            onset = after[0]
         self.seq.append(int(ONSET_IDS[onset % SEGMENT]))
         # how long
         logits = self._logits()
