@@ -111,7 +111,7 @@ def make_handler(player):
                         knobs[name] = knob(name, float(values[1]))
                         for session, inbox in playing:
                             session.turn(**{name: knobs[name]})
-                            if name in ('bpm', 'metronome'):
+                            if name in ('bpm', 'metronome', 'chart'):
                                 inbox.put(('tempo',))
                             if name == 'strategy':
                                 inbox.put(('swap',))

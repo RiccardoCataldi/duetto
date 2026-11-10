@@ -77,6 +77,19 @@ Controls are sliders (drag them; hold Shift to drag finely) and steppers (click 
 
 Knobs and sound are kept in `~/.config/ai-duet/`.
 
+## Play a tune from a chart
+
+With Aria, the `chart` control (AI mind tab, under Range, key & tempo) picks a tune, as from a Real Book: the model plays over its chords bar by bar, round and round, at the chart's tempo with the metronome on (turn `bpm` for another tempo). The top of the piano roll shows the tune and the bar, the chord of the bar and the next one. The chart begins at the next bar after you pick it; the model joins at your first note. Pick a playing style for its part: **it comps** (you improvise), **it solos** (you comp), **duet**.
+
+Charts are text files in [music_transformer/charts/](music_transformer/charts/): Autumn Leaves, Ornithology and a blues in F are there. To add one, write its bars between `|` (`%` repeats the bar before, two chords share a bar), with its title, key and tempo on top, and start the server again:
+
+```
+title: Autumn Leaves
+key: G minor
+bpm: 120
+Cm7 | F7 | Bbmaj7 | Ebmaj7 | Am7b5 | D7 | Gm6 | % |
+```
+
 ## Duo with Aria on a PC with a GPU
 
 [Aria](https://github.com/EleutherAI/aria) (EleutherAI) is a model of expressive solo piano: about 1B parameters, trained on ~60k hours of piano recordings transcribed to MIDI. Where AMT plays one line and leaves the dynamics to `main.py`, Aria plays both its hands and says how hard it strikes each key; it hears your notes and its own as one performance, four hands on one keyboard, and is told the music is jazz (`--genre`). It needs an NVIDIA GPU with ~4 GB free (an RTX 3080 Ti is plenty); the Jetson Orin Nano is too slow for it.

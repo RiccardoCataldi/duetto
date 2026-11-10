@@ -89,6 +89,7 @@ class Listener:
         self.forced = None      # (root, scale in FORCED) it keeps to instead of your key
         self.tempo = None       # seconds a beat of a tempo you fix lasts, its beats from time 0 on; None: your pulse
         self.said = None        # the key it says you are in (said_key)
+        self.chart = None       # (chord(now) -> (root, kind), key) of a chart it follows instead of your chord and key
 
     def stay(self, stay):
         """Sets STAY for this listener."""
@@ -137,7 +138,9 @@ class Listener:
 
     def in_key(self):
         """For each pitch class, how likely it belongs to your key (while you modulate, both keys count), or 1 or 0
-        to the scale it is forced into."""
+        to the scale it is forced into, or to the key of the chart it follows."""
+        if self.chart and not self.forced and self.chart[1] is not None:
+            return MEMBER[self.chart[1]]
         if self.forced:
             root, scale = self.forced
             return np.array([(pc - root) % 12 in FORCED[scale] for pc in range(12)], float)
@@ -149,7 +152,11 @@ class Listener:
         return harmony[2] if harmony else None
 
     def harmony(self, now):
-        """(root, kind, pitch classes) of the chord you are playing now, e.g. (7, '7', {7, 11, 2, 5}); or None."""
+        """(root, kind, pitch classes) of the chord you are playing now, e.g. (7, '7', {7, 11, 2, 5}), or None; the
+        chart's chord at `now` when it follows one."""
+        if self.chart:
+            root, kind = self.chart[0](now)
+            return root, kind, {(root + step) % 12 for step in CHORDS[kind]}
         weight, bass = np.zeros(12), None
         for onset, duration, pitch in self.notes:
             if onset <= now:

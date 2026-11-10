@@ -421,6 +421,24 @@ class AriaSessionTest(unittest.TestCase):
         session.turn(variety=0)
         self.assertGreater([session.play()[2] for _ in range(24)].count(62), 16)
 
+    def test_over_a_chart_it_plays_the_chord_of_the_bar_at_the_charts_tempo(self):
+        from music_transformer.chart import CHARTS, chord
+        self.assertEqual([chord(name) for name in ('C-7', 'F7b9', 'B^7', 'Aø', 'Gm6', 'C7/E', 'Ebmaj9', 'F#o7')],
+                         [(0, 'm7'), (5, '7'), (11, 'maj7'), (9, 'm7b5'), (7, 'm6'), (0, '7'), (3, 'maj7'), (6, 'dim7')])
+        tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'autumn_leaves')
+        self.assertEqual(len(CHARTS[tune].bars), 32)
+        self.session.turn(chart=tune + 1, chord_tone=4.0, apart=0)
+        self.assertEqual((self.session.bpm, self.session.metronome), (120, 1))
+        self.assertEqual(self.session.state()['chord'], 'Cm7 → F7')
+        self.clock.t = 10.2                          # bar 6 of 2 s each: D7, whose F# is not in G minor
+        self.assertEqual(self.session.state()['key'], 'Autumn Leaves 6/32')
+        self.session.hear(10.2, 0.3, 62, 80)
+        bias = self.session._partner(self.session.now() + 30)
+        self.assertGreater(bias[66], bias[65] + 3)   # F# over F
+        self.assertLess(bias[67], bias[65])          # G, a semitone over its third: an avoid note
+        self.session.turn(chart=0)
+        self.assertIsNone(self.session.listener.chart)
+
     def test_with_wait_it_takes_turns_with_you(self):
         self.session.turn(wait=80)
         self.session.hear(0.0, 0.3, 60, 80)
