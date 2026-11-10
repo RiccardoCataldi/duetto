@@ -270,6 +270,19 @@ class DuoSessionTest(unittest.TestCase):
         comps = self.session._partner(self.session._tick(0.27), [], (0, 127), False)   # its left hand does not
         self.assertLess(comps[68], -5)
 
+    def test_soloing_over_a_tune_it_runs_in_triplets_or_sixteenths_for_a_phrase(self):
+        from music_transformer.chart import CHARTS
+        tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'autumn_leaves')   # 120 bpm: a beat is 0.5 s
+        for division, step in ((3, 1 / 6), (4, 0.125)):
+            session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=tune + 1, part=2, hands=1, breath=0)
+            session.hear(0.0, 0.3, 60)
+            with unittest.mock.patch('music_transformer.chart.feel', return_value=division):
+                onsets = sorted({session.play()[0] for _ in range(30)})
+            self.assertTrue(all(min(o % step, step - o % step) <= 0.035 for o in onsets), onsets)   # on its grid
+            gaps = [b - a for a, b in zip(onsets, onsets[1:])]
+            self.assertLessEqual(max(gaps), 2 * step + 0.05)       # a run: no more than two of them of silence
+            self.assertLess(min(gaps), step + 0.03)                # as fast as the division
+
     def test_when_you_let_go_it_hears_how_long_your_note_really_was(self):
         self.session.hear(0.0, 0.3, 60)
         list(self.fill())

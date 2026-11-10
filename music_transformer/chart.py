@@ -90,6 +90,15 @@ def way(session, seconds):
     return random.Random(session.varied + beats(session, seconds) // PHRASE).choice(ways)
 
 
+FEELS = (2, 2, 2, 3, 3, 4, 4, 8, 0)   # how it divides the beat, as often as each is here; 0: out of time
+
+
+def feel(session, seconds):
+    """How a soloist divides the beat at `seconds`: eighths (2), triplets (3), sixteenths (4), thirty-seconds (8),
+    or 0, free of the beat. Another, by chance, every two bars."""
+    return random.Random(session.varied * 31 + 1 + beats(session, seconds) // PHRASE).choice(FEELS)
+
+
 def follow(session, restart=True):
     """The session's chart or bpm knob was turned. With a chart it keeps to `pace`: the tempo you fix, or the
     chart's; the chart begins at `began`, the next bar from now, or, when only the tempo changed (`restart` False),

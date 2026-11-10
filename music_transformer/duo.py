@@ -311,9 +311,18 @@ class DuoSession:
         after = max(last, self._breath())
         earliest = max(after, now + MARGIN)
         latest = min(max(earliest, after + (min(self.max_rest, self.run) if answering else self.max_rest)), MAX_TIME - 1)
+        # soloing over a tune, how it divides the beat for these two bars: eighths, or a run of triplets, sixteenths
+        # or thirty-seconds with no more than two of them of silence, or out of time
+        solos = self.chart and (self.part == 2 or self.part == 1 and not you_play)
+        feel = chart.feel(self, self._seconds(earliest)) if solos else None
+        unit = round(60 / self.pace / feel * TIME_RESOLUTION) if feel else None   # ticks
+        if feel and feel > 2:
+            latest = min(latest, max(earliest, after + 2 * unit))
         # when each hand may play next: (instrument, its line, its register, its onsets as a mask over times)
         hands = []
         for instrument, step, most, register in self._hands(you_play):
+            if unit and instrument == self.me:
+                step = max(min(step, unit - self.grid), 5)   # its line may be as fast as that
             line, window = self._my_line(instrument), torch.full((MAX_TIME,), -float('inf'))
             start, end = earliest, latest
             if line:
@@ -331,7 +340,8 @@ class DuoSession:
             if slot == 0:
                 times = torch.stack([window for *_, window in hands]).max(0).values.to(mask.device)
                 mask[TIME_OFFSET:TIME_OFFSET + MAX_TIME] = times
-                mask = self._on_your_pulse(mask, earliest, int(torch.nonzero(torch.isfinite(times)).max()), you_play)
+                mask = self._on_your_pulse(mask, earliest, int(torch.nonzero(torch.isfinite(times)).max()), you_play,
+                                           feel)
             elif slot == 1:
                 mask[DUR_OFFSET:DUR_OFFSET + MAX_DUR] = 0
             else:
@@ -453,12 +463,15 @@ class DuoSession:
     def _seconds(self, tick):
         return (tick + self.base) / TIME_RESOLUTION
 
-    def _on_your_pulse(self, mask, earliest, latest, you_play):
-        """Keeps only the onsets on your beat (while you play) or your tatum; unchanged while your rhythm is unclear."""
+    def _on_your_pulse(self, mask, earliest, latest, you_play, feel=None):
+        """Keeps only the onsets on your beat (while you play) or your tatum; unchanged while your rhythm is unclear.
+        Soloing over a tune (`feel`, see chart.feel): on that division of the beat, or unchanged when it is 0."""
         pulse = self.listener.pulse(self._seconds(self.now()))
-        if pulse is None:
+        if pulse is None or feel == 0:
             return mask
         unit = self.listener.beat(pulse[0]) if you_play and not self.chart else pulse[0]   # a tune swings in eighths
+        if feel:
+            unit, pulse = self.listener.beat(pulse[0]) / feel, (pulse[0], self.began)
         first = math.ceil((self._seconds(earliest) - pulse[1]) / unit - self.grid / (unit * TIME_RESOLUTION))
         grid = torch.full_like(mask, -float('inf'))
         for k in range(first, first + math.ceil((latest - earliest) / (unit * TIME_RESOLUTION)) + 2):
