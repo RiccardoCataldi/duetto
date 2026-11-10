@@ -27,6 +27,7 @@ CHORDS = {'': (0, 4, 7), 'm': (0, 3, 7), '7': (0, 4, 7, 10), 'm7': (0, 3, 7, 10)
 TENSIONS = {'': (2, 6, 9), 'maj7': (2, 6, 9), '6': (2, 6), 'm': (2, 5), 'm7': (2, 5, 9), 'm6': (2, 5),
             'mMaj7': (2, 5, 9), '7': (2, 9), 'm7b5': (5, 8), 'dim': (2, 5, 8, 11), 'dim7': (2, 5, 8, 11),
             'sus4': (2, 9), '7sus4': (2, 9), '+': (2, 6)}
+AVOID = 3.0      # logit taken from a chord's avoid notes: a semitone over one of its tones (E over your C minor)
 BASS = 0.15      # how much the lowest sounding note says the chord's root is
 
 STAY = 0.97      # chance per note that the key stays: lower follows a modulation sooner but flickers on passing notes
@@ -186,15 +187,17 @@ class Listener:
 
     def bias(self, now, chord_tone, tension, out_of_key):
         """For each of the 128 pitches, how much more a partner would play it now: the tones of your chord and its
-        tensions, less the pitches outside your key (a tension is not taken as one); in a forced scale, by FORCE at
-        least, its tensions included."""
+        tensions, less its avoid notes (a semitone over a chord tone: they clash with it whatever the key) and the
+        pitches outside your key (a tension is not taken as one); in a forced scale, by FORCE at least, its tensions
+        included."""
         in_key, harmony = self.in_key(), self.harmony(now)
         chord = harmony[2] if harmony else set()
         colours = {(harmony[0] + step) % 12 for step in TENSIONS[harmony[1]]} - chord if harmony else set()
         if self.forced:
             colours &= set(np.flatnonzero(in_key))
             out_of_key = max(out_of_key, FORCE)
-        return np.array([chord_tone * (p % 12 in chord) + tension * (p % 12 in colours)
+        avoid = {(tone + 1) % 12 for tone in chord} - chord - colours
+        return np.array([chord_tone * (p % 12 in chord) + tension * (p % 12 in colours) - AVOID * (p % 12 in avoid)
                          - out_of_key * (1 - in_key[p % 12]) * (p % 12 not in colours) for p in range(128)])
 
     @staticmethod

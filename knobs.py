@@ -93,7 +93,7 @@ PRESET_KNOBS = {name for *_, turns in PRESETS for name in turns}
 ENGINE_TURNS = {'aria': {
     'density': {'min_step': (40, 0, 0), 'space': (100, 15, 0), 'max_rest': (600, 300, 100), 'phrase': (5, 12, 32),
                 'breath': (300, 150, 50), 'busy': (0.5, 2.0, 8.0)},
-    'harmony': {'out_of_key': (3.0, 0.5, 0.0), 'chord_tone': (2.0, 0.5, 0.0), 'tension': (0.0, 0.5, 2.0)},
+    'harmony': {'out_of_key': (4.0, 1.5, 0.0), 'chord_tone': (2.0, 0.5, 0.0), 'tension': (0.0, 0.5, 2.0)},
     'dialogue': {'answer': (0, 400, 1000), 'echo': (0.0, 1.5, 4.0), 'follow': (0.0, 1.0, 3.0)},
     'groove': {'grid': (20, 20, 3)},
     'risk': {'temperature': (0.7, 0.95, 1.3), 'min_p': (0.1, 0.035, 0.0), 'variety': (0.0, 1.5, 4.0)},

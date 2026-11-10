@@ -136,5 +136,17 @@ class ListenerTest(unittest.TestCase):
         self.assertAlmostEqual(listener.beat(0.3), 0.6)
 
 
+class AvoidTest(unittest.TestCase):
+    def test_over_your_c_minor_the_major_third_clashes_whatever_the_key(self):
+        listener = Listener()
+        for i in range(30):                          # a long while in C major
+            listener.hear(i * 0.2, 0.2, (60, 62, 64, 65, 67, 69, 71)[i % 7])
+        for pitch in (48, 51, 55):                   # then your C minor chord, held
+            listener.hear(7.0, 4.0, pitch)
+        bias = listener.bias(8.0, 1.0, 1.0, 0.5)
+        self.assertLess(bias[64], bias[63] - 3)      # E against Eb
+        self.assertGreater(bias[62], bias[64])       # its ninth is no avoid note
+
+
 if __name__ == '__main__':
     unittest.main()
