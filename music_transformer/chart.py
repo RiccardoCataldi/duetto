@@ -1,6 +1,7 @@
 """
 A chart, as in a Real Book: the chords of a tune bar by bar, in 4/4, for the duo to play over with a metronome.
-A file in charts/ is a few `name: value` lines (title, key as "G minor", bpm) and then the bars, between `|`: one or
+A file in charts/ is a few `name: value` lines (title, key as "G minor", bpm, feel: straight for even eighths
+instead of swung ones) and then the bars, between `|`: one or
 more chords each, sharing the bar equally; `%` is the bar before again. Chords are spelt as in a Real Book or
 iReal Pro (Cm7, C-7, F7b9, Bbmaj7, B^7, Am7b5, Aø, Gm6, C7/E...) and heard as the nearest of listener.CHORDS.
 """
@@ -12,6 +13,7 @@ import re
 from music_transformer.listener import CHORDS
 
 ROOTS = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
+COUNT = 1   # bars of metronome before a chart begins: the count-in
 BEATS = 4   # shortcut: every chart is in 4/4; give a chart its own `meter` when one in 3/4 is wanted
 
 
@@ -39,11 +41,14 @@ class Chart:
     def __init__(self, path):
         self.name = os.path.splitext(os.path.basename(path))[0]
         self.title, self.bpm, self.key, self.bars = self.name.replace('_', ' '), 120, None, []
+        self.swing = True   # its eighths are swung: the second of each beat on its last third
         with open(path) as f:
             for line in f:
                 head, _, value = line.partition(':')
-                if value and head.strip() in ('title', 'key', 'bpm'):
-                    if head.strip() == 'title':
+                if value and head.strip() in ('title', 'key', 'bpm', 'feel'):
+                    if head.strip() == 'feel':
+                        self.swing = value.strip() != 'straight'
+                    elif head.strip() == 'title':
                         self.title = value.strip()
                     elif head.strip() == 'bpm':
                         self.bpm = int(value)
@@ -101,8 +106,8 @@ def feel(session, seconds):
 
 def follow(session, restart=True):
     """The session's chart or bpm knob was turned. With a chart it keeps to `pace`: the tempo you fix, or the
-    chart's; the chart begins at `began`, the next bar from now, or, when only the tempo changed (`restart` False),
-    it carries on from where it is. Without one: your chord and key again, at the tempo you fix or yours."""
+    chart's; the chart begins at `began`, after COUNT bars of count-in from the next bar, or, when only the tempo
+    changed (`restart` False), it carries on from where it is. Without one: your chord and key again, at the tempo you fix or yours."""
     now, before = session.clock() - session.started, getattr(session, 'pace', 0)
     beats = max(now - getattr(session, 'began', 0.0), 0) * before / 60   # played so far
     session.listener.chart, session.began, session.pace = None, 0.0, session.bpm
@@ -111,7 +116,7 @@ def follow(session, restart=True):
         tune = CHARTS[session.chart - 1]
         session.pace = session.bpm or tune.bpm
         bar = BEATS * 60 / session.pace
-        session.began = now - beats * 60 / session.pace if before and not restart else -(-now // bar) * bar
+        session.began = now - beats * 60 / session.pace if before and not restart else (-(-now // bar) + COUNT) * bar
         session.listener.chart = (lambda at: bar_at(session, at)[1][:2], tune.key)
     session.listener.fix(session.pace, session.began)
 
@@ -126,6 +131,9 @@ def reading(session, state):
         state['bpm'] = session.pace
         state['chart'] = {'title': tune.title, 'bars': [[name for *_, name in chords] for chords in tune.bars],
                           'bar': bar, 'beat': int(max(now - session.began, 0) * session.pace / 60 % BEATS)}
+        if now < session.began:   # the count-in: no bar yet, and the beats still to go
+            left = int((session.began - now) * session.pace / 60) + 1
+            state['key'], state['chart']['bar'], state['chart']['count'] = f"{tune.title} in {left}", -1, left
     return state
 
 

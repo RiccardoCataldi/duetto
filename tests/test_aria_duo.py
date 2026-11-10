@@ -86,6 +86,7 @@ class AriaSessionTest(unittest.TestCase):
         torch.manual_seed(0)
         self.clock, self.model = Clock(), UniformModel()
         self.session = AriaSession(self.model, clock=self.clock)
+        self.enterContext(unittest.mock.patch('music_transformer.chart.COUNT', 0))   # charts begin at once here
 
     def fill(self):
         notes = []

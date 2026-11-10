@@ -61,7 +61,7 @@ def amt(model=None, left=None, corpus=None):
     print(f"AMT model loaded on {generator.device}, {len(corpus)} MIDI files in its memory")
 
     def session(**knobs):
-        if knobs.get('strategy'):
+        if knobs.get('strategy') and not knobs.get('chart'):   # over a tune it is the duo that plays
             return JamSession(generator.model, generator.device, **knobs)
         return duo.DuoSession(generator.model, generator.device, corpus=corpus, **hands, **knobs)
 
@@ -114,7 +114,7 @@ def make_handler(player):
                             session.turn(**{name: knobs[name]})
                             if name in ('bpm', 'metronome', 'chart'):
                                 inbox.put(('tempo',))
-                            if name == 'strategy':
+                            if name == 'strategy' or (name == 'chart' and knobs.get('strategy')):
                                 inbox.put(('swap',))
                         print(f"duo: {name} = {knobs[name]}")
             except (ConnectionResetError, ValueError) as e:
@@ -148,7 +148,9 @@ def make_handler(player):
                     while True:
                         # your keys come first; otherwise sample on, or wait while far enough ahead
                         # both engines count in ticks of 10 ms
-                        wait = None if session.base is None else max(session.ahead() - LOOKAHEAD, 0) / 100
+                        if session.base is None and hasattr(session, 'begin'):
+                            session.begin()   # over a tune it may start by itself
+                        wait = 0.2 if session.base is None else max(session.ahead() - LOOKAHEAD, 0) / 100
                         try:
                             note = inbox.get(timeout=wait) if wait != 0 else inbox.get_nowait()
                         except queue.Empty:
@@ -170,13 +172,13 @@ def make_handler(player):
                             since = since or time.perf_counter()
                             cut = session.hear(*note[1:])
                             key = session.listener.said_key()
-                            if key != shown:
+                            if key != shown and key is not None:
                                 shown = key
                                 sure = session.listener.belief[key]
                                 print(f"duo: {note[1]:.1f}s you are in {session.listener.name(key)} ({sure:.0%})")
                             if cut is not None:
                                 self.wfile.write(f"cut {cut:.3f}\n".encode())
-                        elif session.ahead() < LOOKAHEAD:
+                        elif session.base is not None and session.ahead() < LOOKAHEAD:
                             begun = time.perf_counter()
                             sampled = session.play()
                             cut = session.recut()

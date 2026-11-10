@@ -152,7 +152,7 @@ class Listener:
     def in_key(self):
         """For each pitch class, how likely it belongs to your key (while you modulate, both keys count), or 1 or 0
         to the scale it is forced into, or to the key of the chart it follows."""
-        if self.chart and not self.forced and self.chart[1] is not None:
+        if self.chart and self.chart[1] is not None:   # a tune comes before a scale you force
             return MEMBER[self.chart[1]]
         if self.forced:
             root, scale = self.forced
@@ -245,7 +245,7 @@ class Listener:
         in_key, harmony = self.in_key(), self.harmony(now)
         chord = harmony[2] if harmony else set()
         colours = {(harmony[0] + step) % 12 for step in TENSIONS[harmony[1]]} - chord if harmony else set()
-        if self.forced:
+        if self.forced and not self.chart:
             colours &= set(np.flatnonzero(in_key))
             out_of_key = max(out_of_key, FORCE)
         elif self.chart:   # the scale of the chord of the bar, and nothing else; a bass under it
@@ -259,7 +259,7 @@ class Listener:
             return low + np.array([chord_tone * (p % 12 in chord) + tension * (p % 12 in colours)
                                    - AVOID * (p % 12 in avoid) - CHART_FORCE * (1 - in_key[p % 12]) for p in range(128)])
         avoid = {(tone + 1) % 12 for tone in chord} - chord - colours
-        free = colours if self.forced else colours | chord   # the chord you play is never out of your key
+        free = colours if self.forced and not self.chart else colours | chord   # the chord you play is never out of your key
         return np.array([chord_tone * (p % 12 in chord) + tension * (p % 12 in colours) - AVOID * (p % 12 in avoid)
                          - out_of_key * (1 - in_key[p % 12]) * (p % 12 not in free) for p in range(128)])
 

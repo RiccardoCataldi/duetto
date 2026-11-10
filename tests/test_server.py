@@ -33,5 +33,11 @@ class ServerTest(unittest.TestCase):
             duo.shutdown()
 
 
+class AmtServerTest(unittest.TestCase):
+    def test_over_a_tune_the_duo_plays_whatever_the_strategy(self):
+        import inspect
+        self.assertIn("knobs.get('strategy') and not knobs.get('chart')", inspect.getsource(server.amt))
+
+
 if __name__ == '__main__':
     unittest.main()

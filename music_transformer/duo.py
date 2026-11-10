@@ -17,7 +17,7 @@ from anticipation.vocab import AUTOREGRESS, DUR_OFFSET, NOTE_OFFSET, TIME_OFFSET
 from anticipation.sample import safe_logits, nucleus
 
 from music_transformer import bebop, chart
-from music_transformer.listener import BASS_TOP, CHART_FORCE
+from music_transformer.listener import BASS_TOP, CHART_FORCE, ROOT
 from music_transformer.listener import FORCED, NAMES, STAY, Listener, hands
 from music_transformer.memory import Memory
 
@@ -81,6 +81,7 @@ RESOLVE = 6.0     # logit added to the chord tone it approached: the next note l
 TARGET = 1.5      # logit added to the chord's tones on the beat
 STYLE = 1.5       # how much it takes its notes over each chord from bebop soloists' habits (bebop.py)
 LINE = 1.5        # and how its line moves from one note to the next
+WALK = 4.0        # logit added to the root where its walking bass begins a bar or a chord
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does
 KNOBS = {
@@ -128,9 +129,9 @@ KNOBS = {
     'bpm': (0, 0, 240, 'bpm', "the tempo it keeps to, its beats on the metronome's: yours as it hears it, or one you fix"),
     'metronome': (0, 0, 1, 'choice:off/on', "a click on each beat of the tempo you fix"),
     'chart': chart.KNOB(),
-    'part': (1, 0, 2, 'choice:comps/duet/solos', "over a tune: it comps on the chords' scales, it solos as a jazz player "
-             "does (scales, blues, pentatonics, arpeggios, chromatic approaches), or it comps while you play and solos "
-             "when you rest"),
+    'part': (1, 0, 3, 'choice:comps/duet/solos/trades', "over a tune: it comps, with a walking bass, for you to solo; "
+             "duet: it comps while you play and solos when you rest; it solos as a jazz player does, for you to comp; "
+             "or you trade fours: four bars of your solo, then four of its own"),
     # the jam_bot's ways (jam.py): it starts again from your last notes when its strategy says, and plays on freely
     'strategy': (0, 0, 3, 'choice:duo/trade/gesture/request',
                  "the duo's own way, or the jam_bot's: taking turns, starting again after each of your gestures, or when you cue it"),
@@ -217,11 +218,32 @@ class DuoSession:
         active = ALWAYS | IN_EFFECT[mode] | ({'grid'} if pulse else set()) | ({'left_step'} if self.hands == 2 else set())
         active = active - {'stay'} | {'root'} if self.scale else active   # forced: your key no longer counts
         active |= {'metronome'} if self.bpm else set()
+        if self.chart:   # the tune says the key, the chords and when it plays
+            active = active - {'root', 'scale', 'stay', 'timeout', 'recall', 'silence', 'sparse', *RECALLED} | {
+                'part', 'metronome'}
+            if self.part == 3:
+                mode = 'its turn' if self._solos(at, False) else 'your turn'
         heard = self.listener.name(key) if key is not None else None
         return chart.reading(self, {
             'mode': mode, 'key': self.listener.forced_name() or heard,
             'chord': self.listener.chord_label(at) if chord else None,
             'bpm': round(60 / self.listener.beat(pulse[0])) if pulse else None, 'active': sorted(active)})
+
+    def begin(self):
+        """Over a tune, when it comps or solos for you (not in a duet, where it follows you), it starts by itself as
+        the count-in ends: your first note is not what it waits for."""
+        if self.base is None and self.chart and self.part != 1 and \
+                self.clock() - self.started >= self.began - LOOKAHEAD / TIME_RESOLUTION:
+            self.base = round((self.clock() - self.started) * TIME_RESOLUTION)
+            self.heard_at = -10 ** 6   # you have not played: as if long ago
+
+    def _solos(self, at, you_play):
+        """Whether it solos at session seconds `at` over a tune; otherwise it comps."""
+        if not self.chart:
+            return False
+        if self.part == 3:   # trading fours: yours first
+            return chart.bar_at(self, at)[0] // 4 % 2 == 1
+        return self.part == 2 or (self.part == 1 and not you_play)
 
     def octaves(self):
         """The lowest and highest pitch it may play, from C of its lowest octave to B of its highest (C4 = 60)."""
@@ -240,7 +262,8 @@ class DuoSession:
 
     def ahead(self):
         """Ticks of music already sampled beyond now; the caller samples more while this is under LOOKAHEAD."""
-        now, last = self.now(), max(self._last_time(), self._breath(), self._tick(self.cursor))
+        walks = self.chart and self.hands == 2   # its bass walks on while its right hand breathes
+        now, last = self.now(), max(self._last_time(), 0 if walks else self._breath(), self._tick(self.cursor))
         return LOOKAHEAD + 5 if self._timed_out(max(last, now)) and not self.owed else last - now
 
     def hear(self, onset, duration, pitch, velocity=None):
@@ -310,12 +333,13 @@ class DuoSession:
         if not self.free:
             return None
         answering = self.heard_at is not None and not you_play and now - self.heard_at < self.answer
-        after = max(last, self._breath())
-        earliest = max(after, now + MARGIN)
+        walks, breath = self.chart and self.hands == 2, self._breath()
+        after = last if walks else max(last, breath)   # its bass walks on while its right hand breathes
+        earliest = max(after, now + MARGIN, self._tick(self.began) if self.chart else 0)   # not in the count-in
         latest = min(max(earliest, after + (min(self.max_rest, self.run) if answering else self.max_rest)), MAX_TIME - 1)
         # soloing over a tune, how it divides the beat for these two bars: eighths, or a run of triplets, sixteenths
         # or thirty-seconds with no more than two of them of silence, or out of time
-        solos = self.chart and (self.part == 2 or self.part == 1 and not you_play)
+        solos = self._solos(self._seconds(earliest), you_play)
         feel = chart.feel(self, self._seconds(earliest)) if solos else None
         unit = round(60 / self.pace / feel * TIME_RESOLUTION) if feel else None   # ticks
         if feel and feel > 2:
@@ -326,7 +350,8 @@ class DuoSession:
             if unit and instrument == self.me:
                 step = max(min(step, unit - self.grid), 5)   # its line may be as fast as that
             line, window = self._my_line(instrument), torch.full((MAX_TIME,), -float('inf'))
-            start, end = earliest, latest
+            start, end = max(earliest, breath) if walks and instrument == self.me else earliest, latest
+            end = max(end, start)
             if line:
                 mine = line[-1][0]
                 chord = [note for time_, note in line if time_ == mine]
@@ -336,6 +361,21 @@ class DuoSession:
             if line:
                 window[mine + 1:mine + step] = -float('inf')
             hands.append((instrument, line, register, window))
+        # its bass walks: a note on every beat. Nothing is played past the next beat its left hand owes
+        due, left = None, next((hand for hand in hands if hand[0] == self.left), None)
+        if walks and left and len(hands) == 2:
+            beat, origin = 60 / self.pace * TIME_RESOLUTION, self.began * TIME_RESOLUTION - self.base
+            k = math.ceil((earliest - origin - self.grid) / beat)
+            if left[1] and left[1][-1][0] >= round(origin + k * beat) - self.grid:
+                k += 1   # this beat has its note: the next one
+            due = round(origin + k * beat)
+            if due + self.grid + 1 < MAX_TIME:
+                left[3][:] = -float('inf')   # on the beat, and only there
+                left[3][max(due, earliest):due + self.grid + 1] = 0   # not early: it hears the chord of the beat
+                for *_, window in hands:
+                    window[due + self.grid + 1:] = -float('inf')
+            else:
+                due = None
         for slot in range(3):
             logits = self._logits()
             mask = torch.full_like(logits, -float('inf'))
@@ -348,8 +388,13 @@ class DuoSession:
                 mask[DUR_OFFSET:DUR_OFFSET + MAX_DUR] = 0
             else:
                 tick = self.seq[-2] - TIME_OFFSET
+                # on the beat it owes, once its right hand has a note there (or may not play), the bass plays
+                right = next((hand for hand in hands if hand[0] == self.me), None)
+                owed = due is not None and tick >= due and bool(torch.isfinite(left[3][tick])) and (
+                    right is None or not torch.isfinite(right[3][tick]) or
+                    bool(right[1]) and right[1][-1][0] >= due - self.grid)
                 for instrument, line, (low, high), window in hands:
-                    if not torch.isfinite(window[tick]):
+                    if not torch.isfinite(window[tick]) or (owed and instrument != self.left):
                         continue   # this hand may not play now
                     first = NOTE_OFFSET + instrument * MAX_PITCH
                     mask[first + low:first + high + 1] = 0
@@ -420,7 +465,8 @@ class DuoSession:
         """The note just sampled, once it has joined what it has said and woken its memory of itself."""
         time_, duration, note = self.seq[-3:]
         onset, pitch = self._seconds(time_ - TIME_OFFSET), (note - NOTE_OFFSET) % MAX_PITCH
-        self.spoken = self.spoken[-256:] + [onset]
+        if not (self.chart and self._instrument(note) == self.left):   # its walking bass is no part of its phrases
+            self.spoken = self.spoken[-256:] + [onset]
         self.cursor = max(self.cursor, onset)
         self.mind.own(onset, pitch)
         return onset, (duration - DUR_OFFSET) / TIME_RESOLUTION, pitch, 'left' if self._instrument(note) == self.left else 'right'
@@ -458,7 +504,10 @@ class DuoSession:
                  self.chord if you_play else self.solo_chord)
         if self.hands == 1:
             return [(*right, (low, high))]
-        hands = [(*right, (max(low, RIGHT_BOTTOM), high)), (self.left, self.left_step, LEFT_CHORD, (low, min(high, LEFT_TOP)))]
+        left = (self.left, self.left_step, LEFT_CHORD, (low, min(high, LEFT_TOP)))
+        if self.chart:   # a walking bass: a note a beat, under the chords
+            left = (self.left, max(round(60 / self.pace * TIME_RESOLUTION) - self.grid - 1, 5), 1, (low, min(high, BASS_TOP - 1)))
+        hands = [(*right, (max(low, RIGHT_BOTTOM), high)), left]
         hands = [hand for hand in hands if hand[3][0] <= hand[3][1]]   # its octaves may leave room for one hand only
         return hands or [(*right, (low, high))]
 
@@ -471,12 +520,17 @@ class DuoSession:
         pulse = self.listener.pulse(self._seconds(self.now()))
         if pulse is None or feel == 0:
             return mask
-        unit = self.listener.beat(pulse[0]) if you_play and not self.chart else pulse[0]   # a tune swings in eighths
-        if feel:
+        unit = self.listener.beat(pulse[0]) if you_play and not self.chart else pulse[0]
+        swung = self.chart and feel in (None, 2) and chart.CHARTS[self.chart - 1].swing   # eighths, swung
+        if swung:   # the beat in three: its first third and its last
+            unit, pulse = self.listener.beat(pulse[0]) / 3, (pulse[0], self.began)
+        elif feel:
             unit, pulse = self.listener.beat(pulse[0]) / feel, (pulse[0], self.began)
         first = math.ceil((self._seconds(earliest) - pulse[1]) / unit - self.grid / (unit * TIME_RESOLUTION))
         grid = torch.full_like(mask, -float('inf'))
         for k in range(first, first + math.ceil((latest - earliest) / (unit * TIME_RESOLUTION)) + 2):
+            if swung and k % 3 == 1:
+                continue
             tick = round((pulse[1] + k * unit) * TIME_RESOLUTION) - self.base
             grid[TIME_OFFSET + max(tick - self.grid, earliest):TIME_OFFSET + min(tick + self.grid, latest) + 1] = 0
         on = mask + grid
@@ -489,7 +543,7 @@ class DuoSession:
         in_key = self.listener.in_key()
         expected = self.mind.expect(at)[0] if self.recall and not self.chart else None   # the harmony it remembers comes next, not yours now
         chord_tone = max(self.chord_tone, chart.CHANGES) if self.chart else self.chord_tone
-        solos = self.chart and right and (self.part == 2 or self.part == 1 and not you_play)
+        solos = right and self._solos(at, you_play)
         way = chart.way(self, at) if solos else None
         if way == 'bebop':
             chord_tone = 0   # what it plays over the chord comes from the soloists' habits instead (_bebop)
@@ -497,6 +551,8 @@ class DuoSession:
                                                way)[:MAX_PITCH]
                             + (0 if expected is None else self.recall * np.tile(expected, 11)[:MAX_PITCH]),
                             dtype=torch.float) + self._register(tick, you_play, register, right)
+        if self.chart and not right:
+            bias += self._walk(at, line)
         if solos:
             bias += self._bebop(at) if way == 'bebop' else self._approach(at, line, way)
             if line and tick - line[-1][0] < 2 * 60 / self.pace * TIME_RESOLUTION:   # its line goes on: mostly by step
@@ -513,6 +569,24 @@ class DuoSession:
                 if 0 <= echo < MAX_PITCH:
                     bias[echo] += self.echo
         return bias.to(self.device)
+
+    def _walk(self, at, line):
+        """Logits added to its left hand's pitches over a tune, a walking bass: the root when the bar or the chord
+        begins; on the beat before another chord, a semitone from its root; and from one note to the next mostly by
+        step."""
+        bias, beat, low = torch.zeros(MAX_PITCH), 60 / self.pace, PITCHES < BASS_TOP
+        here, before, coming = (self.listener.harmony(t)[:2] for t in (at, at - beat, at + beat))
+        if here != before or int(chart.beats(self, at) + 0.1) % chart.BEATS == 0:
+            bias[(PITCHES % 12 == here[0]) & low] += WALK
+        else:   # it walks on from the root: the listener's liking for it is taken back
+            bias[(PITCHES % 12 == here[0]) & low] -= ROOT
+            if coming != here:
+                for step in (-1, 1):
+                    bias[(PITCHES % 12 == (coming[0] + step) % 12) & low] += CHART_FORCE + WALK / 2
+        if line:
+            bias += LINE * torch.tensor(bebop.moves((line[-1][1] - NOTE_OFFSET) % MAX_PITCH)[:MAX_PITCH],
+                                        dtype=torch.float)
+        return bias
 
     def _bebop(self, at):
         """Logits added to its pitches when it solos as bebop players do (bebop.py): each step of the chord as often

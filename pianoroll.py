@@ -207,6 +207,9 @@ class Roll:
         """The tune as a page of a Real Book: its bars in rows of eight (four in a narrow window), the chords in
         each, the bar being played lit with its beats under it, and a double line where the tune ends."""
         bars, now = self.chart['bars'], self.chart['bar']
+        if self.chart.get('count'):   # the count-in: the beats to go, large
+            theme.text(screen, str(self.chart['count']), 64, AI, (self.size[0] // 2, self.keyboard.top - 120),
+                       bold=True, anchor='center')
         width = self.size[0]
         across = 8 if width >= 900 else 4
         cell_w, cell_h = min((width - 56) // across, 150), 44

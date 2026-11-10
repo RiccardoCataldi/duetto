@@ -78,6 +78,8 @@ PRESETS = [
     ('it solos', "you play the harmony, it improvises a line over it, up high",
      {'role': 0.85, 'dialogue': 0.3, 'density': 0.8, 'harmony': 0.6, 'groove': 0.7, 'risk': 0.75, 'focus': 0.8},
      {'chord': 1, 'solo_chord': 1, 'hands': 1, 'lowest': 5, 'highest': 7, 'busy': 8.0, 'part': 2}),
+    ('trade fours', "over a tune: four bars of your solo while it comps, then four of its own, and so on", {},
+     {'part': 3}),
     ('free', "outside your key and off your pulse, surprising and dense: free improvisation together",
      {'harmony': 1.0, 'risk': 1.0, 'groove': 0.0, 'density': 0.75, 'focus': 0.8, 'key follow': 1.0}, {}),
     # the jam_bot's ways (music_transformer/jam.py): the model left free, started again from your last notes
@@ -103,7 +105,8 @@ MODES = {'listening': 'waiting for you to play', 'accompanying': 'accompanying y
          'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn', 'waiting': 'your turn'}
 
 # the sections of the tabs: the model's knobs on the AI mind tab and in Advanced, and each one's sound
-REGISTER = ('lowest', 'highest', 'root', 'scale', 'bpm', 'metronome', 'chart', 'part')
+TUNE = ('chart', 'part', 'bpm', 'metronome')   # playing along with a tune
+REGISTER = ('lowest', 'highest', 'root', 'scale')
 ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'answer', 'grid', 'phrase', 'breath', 'timeout',
                          'commit')),
             ('Harmony', ('out_of_key', 'chord_tone', 'tension', 'stay')),
@@ -113,7 +116,7 @@ ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'an
             ('Memory of you', ('recall', 'silence', 'sparse', 'decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic',
                                'itself', 'probabilistic')),
             ('jam_bot', ('strategy', 'context', 'bars', 'wait', 'lock', 'every', 'trigger')),
-            ('Range, key & tempo', REGISTER)]
+            ('Play along', TUNE), ('Range & key', REGISTER)]
 SOUND_GROUPS = [('', ('instrument',)), ('Mix', ('volume', 'pan', 'reverb')),
                 ('Envelope', ('attack', 'decay', 'sustain', 'release')), ('Delay', ('echo', 'delay', 'feedback'))]
 
@@ -278,8 +281,8 @@ class Mind:
         knob it leaves out stands where its control puts it, or at its default."""
         presets = []
         for name, what, macros, turns in PRESETS:
-            if 'strategy' in turns and 'strategy' not in self.knobs:
-                continue   # one of the jam_bot's ways: this model has none
+            if 'strategy' in turns and ('strategy' not in self.knobs or self.knobs.get('chart') and self.knobs['chart'].value):
+                continue   # one of the jam_bot's ways: this model has none, or a tune is on, which they do not play
             macros = {m.name: macros.get(m.name, 0.5) for m in self.macros}
             free = {n: along(anchors, macros[m]) for m, knobs in self.turns.items() for n, anchors in knobs.items()}
             presets.append((name, what, macros, {n: turns.get(n, free.get(n, self.knobs[n].default))
@@ -379,8 +382,10 @@ class Panel:
         if not self.mind.knobs:
             return None
         knobs = self.mind.knobs
-        return [('Playing style', 'presets'), ('Character', self.mind.macros),
-                ('Range, key & tempo', [knobs[n] for n in REGISTER if n in knobs])]
+        tune = (self.mind.state or {}).get('chart')
+        return [('Playing style', 'presets'),
+                (f"Play along: {tune['title']}" if tune else 'Play along: no tune', [knobs[n] for n in TUNE if n in knobs]),
+                ('Character', self.mind.macros), ('Range & key', [knobs[n] for n in REGISTER if n in knobs])]
 
     def _groups(self, groups, knobs):
         if not knobs:
