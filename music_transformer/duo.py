@@ -183,10 +183,8 @@ class DuoSession:
             self.listener.stay(self.stay)
         if 'root' in knobs or 'scale' in knobs:
             self.listener.force(self.root, list(FORCED)[self.scale - 1] if self.scale else None)
-        if 'bpm' in knobs:
-            self.listener.fix(self.bpm)
-        if 'chart' in knobs:
-            chart.follow(self)
+        if 'bpm' in knobs or 'chart' in knobs:
+            chart.follow(self, 'chart' in knobs)
 
     def state(self):
         """What it hears and what it is doing: {'mode', 'key', 'chord', 'bpm', 'active': the knobs in effect}."""

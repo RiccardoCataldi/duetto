@@ -120,6 +120,7 @@ class Roll:
         self.instruments = {}     # channel -> the instrument it plays, if not PLAYERS'
         self.ai_range = None      # (lowest, highest) pitch the model may play, shown above the keyboard
         self.readout = None       # what the model hears and does, shown at the top: (what, as it stands)
+        self.chart = None         # the tune it plays over: {'title', 'bars': [[chord, ...], ...], 'bar', 'beat'}
         self.offline = None       # or why it cannot say
         self.hint = None          # a key to press, in the corner
         self.header = pygame.Surface((width, HEADER_H), pygame.SRCALPHA)
@@ -159,6 +160,8 @@ class Roll:
         self.keyboard.draw(screen, lit)
         self.keyboard.finish(screen)
         self._header(screen, clock)
+        if self.chart:
+            self._chart(screen)
 
     def _range(self, screen, top):
         """A line in the model's colour over the keys it may play, when it may not play them all."""
@@ -199,6 +202,38 @@ class Roll:
             pygame.draw.rect(screen, theme.RAISED, pill, border_radius=15)
             pygame.draw.circle(screen, mix(theme.FAINT, AI, pulse), (pill.x + 16, pill.centery), 4)
             screen.blit(words, words.get_rect(midleft=(pill.x + 28, pill.centery)))
+
+    def _chart(self, screen):
+        """The tune as a page of a Real Book: its bars in rows of eight (four in a narrow window), the chords in
+        each, the bar being played lit with its beats under it, and a double line where the tune ends."""
+        bars, now = self.chart['bars'], self.chart['bar']
+        width = self.size[0]
+        across = 8 if width >= 900 else 4
+        cell_w, cell_h = min((width - 56) // across, 150), 44
+        rows = -(-len(bars) // across)
+        left, top = (width - cell_w * across) // 2, HEADER_H - 14
+        page = pygame.Surface((cell_w * across + 24, rows * cell_h + 20), pygame.SRCALPHA)
+        pygame.draw.rect(page, (*theme.SURFACE, 225), page.get_rect(), border_radius=12)
+        screen.blit(page, (left - 12, top - 10))
+        for i, chords in enumerate(bars):
+            cell = pygame.Rect(left + i % across * cell_w, top + i // across * cell_h, cell_w, cell_h)
+            if i == now:
+                pygame.draw.rect(screen, mix(AI, theme.SURFACE, 0.72), cell.inflate(-4, -4), border_radius=7)
+                for beat in range(4):
+                    dot = (cell.centerx - 15 + 10 * beat, cell.bottom - 8)
+                    pygame.draw.circle(screen, AI if beat <= self.chart['beat'] else FAINT, dot, 2)
+            pygame.draw.line(screen, theme.LINE, cell.topleft, (cell.x, cell.bottom - 1), 1)
+            same = i % across and chords == bars[i - 1]   # the bar before again: a Real Book's repeat sign
+            names = ['%'] if same and i != now else chords
+            for k, name in enumerate(names):
+                colour = TEXT if i == now else FAINT if same else MUTED
+                room = cell_w / len(names)
+                theme.text(screen, theme.fit(name, 15, room - 8, i == now), 15, colour,
+                           (round(cell.x + room * (k + 0.5)), cell.centery - 3), bold=i == now, anchor='center')
+        end = left + (len(bars) - 1) % across * cell_w + cell_w
+        y = top + (rows - 1) * cell_h
+        for x in (end - 4, end - 1):
+            pygame.draw.line(screen, MUTED, (x, y + 4), (x, y + cell_h - 5), 1 if x < end - 1 else 2)
 
     def _readout(self, screen, left, right):
         """Your key, chord and tempo, and what the model is doing, as cells across the middle, as many as fit."""
@@ -386,6 +421,7 @@ def live(port_name, server):
         now = time.monotonic()
         roll.instruments = {player: sound.GM[engine.sound[player]['instrument']] for player in PLAYERS}
         roll.readout = panel.mind.readout()
+        roll.chart = (panel.mind.state or {}).get('chart')
         roll.offline = None if panel.mind.knobs else 'Connecting to the model…'
         roll.hint = typing.says() if typed else None if shown else 'K: show the controls'
         mind = {name: round(knob.value) for name, knob in panel.mind.knobs.items() if name in ('lowest', 'highest')}

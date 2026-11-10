@@ -87,6 +87,7 @@ class Duo:
         self.late = 0                  # the model's notes that came later than LATE_S, skipped
         self.bpm, self.metronome = 0, False   # the tempo the model keeps to (0: yours) and whether we click it
         self.click_at = None           # when the metronome's next beat falls
+        self.bar_at = started          # when a bar of the metronome begins: its beats are counted from there
 
     def note_on(self, pitch, velocity, now):
         with self.lock:
@@ -138,6 +139,7 @@ class Duo:
                 self.pending = [n for n in self.pending if n[0] < cut]
             elif kind == 'tempo':
                 self.bpm, self.metronome, self.click_at = float(values[0]), values[1] == '1', None
+                self.bar_at = self.started + (float(values[2]) if len(values) > 2 else 0)
 
     def tick(self, now):
         """Starts and stops the model's notes that are due, and clicks the metronome."""
@@ -168,12 +170,12 @@ class Duo:
         beat = 60 / self.bpm
         if self.click_at is not None and now >= self.click_at:
             if now - self.click_at < LATE_S:
-                click = CLICK[round((self.click_at - self.started) / beat) % BAR > 0]
+                click = CLICK[round((self.click_at - self.bar_at) / beat) % BAR > 0]
                 self.midi_rec.play_midi_message([0x90, click, CLICK_VELOCITY], channel=DRUMS)
                 self.midi_rec.play_midi_message([0x80, click, 0], channel=DRUMS)
             self.click_at = None
         if self.click_at is None:
-            self.click_at = self.started + math.floor((now - self.started) / beat + 1) * beat
+            self.click_at = self.bar_at + math.floor((now - self.bar_at) / beat + 1) * beat
 
     def stop(self, now):
         with self.lock:

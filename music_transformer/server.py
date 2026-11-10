@@ -12,8 +12,9 @@ One line per message, times in seconds since the connection opened:
                                                       right hand; Aria says how hard, AMT leaves it to the client
     server -> client   "cut <onset>"                     forget the model's notes from <onset> on: they are resampled
                                                          (or the strategy knob changed: it starts again its new way)
-    server -> client   "tempo <bpm> <metronome>"         the tempo it keeps to (0: yours), its beats on k * 60 / bpm,
-                                                         and whether to click them (1); at once and whenever turned
+    server -> client   "tempo <bpm> <metronome> <bar>"   the tempo it keeps to (0: yours), a bar's first beat at <bar>
+                                                         and a beat every 60 / bpm from it, and whether to click
+                                                         them (1); at once and whenever turned
 One duo at a time; a second connection waits for the first to close.
 
 A connection that starts with "knobs" turns the duo's knobs (the engine's KNOBS) instead, while a duo plays or before:
@@ -155,7 +156,8 @@ def make_handler(player):
                         if note is None:
                             break
                         if note and note[0] == 'tempo':
-                            self.wfile.write(f"tempo {session.bpm} {session.metronome}\n".encode())
+                            self.wfile.write(f"tempo {getattr(session, 'pace', session.bpm)} {session.metronome} "
+                                             f"{getattr(session, 'began', 0.0):.3f}\n".encode())
                         elif note and note[0] == 'swap':   # the strategy knob: the duo's way, or one of the jam_bot's
                             playing.remove((session, inbox))
                             session = player.session(started=opened, **knobs)

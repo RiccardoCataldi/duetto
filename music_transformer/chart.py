@@ -65,25 +65,28 @@ class Chart:
 CHANGES = 1.5   # over a chart it leans on the chord of the bar this much at least: it plays the changes
 # the knob of a session that follows charts: its `chart`, `bpm`, `metronome`, `clock`, `started` and `listener`
 KNOB = lambda: (0, 0, len(CHARTS), 'choice:' + '/'.join(['off', *(chart.name for chart in CHARTS)]),
-                "a tune it plays over with you, bar by bar from the next bar on, at its tempo with a metronome (charts/)")
+                "a tune it plays over with you, bar by bar from the next bar on, at its tempo unless you fix one")
 
 
 def bar_at(session, seconds):
     """(bar from 0, (root, kind, name)) of the session's chart at session `seconds`."""
-    return CHARTS[session.chart - 1].at(max(seconds - session.began, 0) * session.bpm / 60)
+    return CHARTS[session.chart - 1].at(max(seconds - session.began, 0) * session.pace / 60)
 
 
-def follow(session):
-    """The session's chart knob was turned: it follows the chart at its tempo unless you fixed one, clicked, from
-    the next bar of the metronome on; or your chord and key again."""
-    session.listener.chart, session.began = None, 0.0
+def follow(session, restart=True):
+    """The session's chart or bpm knob was turned. With a chart it keeps to `pace`: the tempo you fix, or the
+    chart's; the chart begins at `began`, the next bar from now, or, when only the tempo changed (`restart` False),
+    it carries on from where it is. Without one: your chord and key again, at the tempo you fix or yours."""
+    now, before = session.clock() - session.started, getattr(session, 'pace', 0)
+    beats = max(now - getattr(session, 'began', 0.0), 0) * before / 60   # played so far
+    session.listener.chart, session.began, session.pace = None, 0.0, session.bpm
     if session.chart:
         tune = CHARTS[session.chart - 1]
-        session.bpm, session.metronome = session.bpm or tune.bpm, 1
-        bar = BEATS * 60 / session.bpm
-        session.began = -(-(session.clock() - session.started) // bar) * bar
-        session.listener.chart = (lambda now: bar_at(session, now)[1][:2], tune.key)
-    session.listener.fix(session.bpm)
+        session.pace = session.bpm or tune.bpm
+        bar = BEATS * 60 / session.pace
+        session.began = now - beats * 60 / session.pace if before and not restart else -(-now // bar) * bar
+        session.listener.chart = (lambda at: bar_at(session, at)[1][:2], tune.key)
+    session.listener.fix(session.pace)
 
 
 def reading(session, state):
@@ -92,8 +95,10 @@ def reading(session, state):
         tune, now = CHARTS[session.chart - 1], session.clock() - session.started
         bar, here = bar_at(session, now)
         state['key'] = f"{tune.title} {bar + 1}/{len(tune.bars)}"
-        state['chord'] = f"{here[2]} → {bar_at(session, now + BEATS * 60 / session.bpm)[1][2]}"
-        state['bpm'] = session.bpm
+        state['chord'] = f"{here[2]} > {bar_at(session, now + BEATS * 60 / session.pace)[1][2]}"
+        state['bpm'] = session.pace
+        state['chart'] = {'title': tune.title, 'bars': [[name for *_, name in chords] for chords in tune.bars],
+                          'bar': bar, 'beat': int(max(now - session.began, 0) * session.pace / 60 % BEATS)}
     return state
 
 

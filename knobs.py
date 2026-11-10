@@ -263,6 +263,8 @@ class Mind:
         if keep:
             self._saved('knobs')[knob.name] = knob.value
             self._save()
+            if knob.name == 'chart' and knob.value and 'metronome' in self.knobs:
+                self.knobs['metronome'].set(1)   # a chart starts with its click: the knob says so, and turns it off
 
     def _macro(self, macro):
         for name, anchors in self.turns[macro.name].items():

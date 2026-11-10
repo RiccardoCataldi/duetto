@@ -139,6 +139,13 @@ class DuoTest(unittest.TestCase):
             self.duo.tick(100.0 + ms / 1000)
             clicks += [(ms, m[1]) for m, channel in self.out.messages if channel == main.DRUMS and m[0] == 0x90]
         self.assertEqual(clicks, [(1500, 77), (2000, 76), (2500, 77), (3000, 77)])   # beat 4 is the second bar's first
+        self.duo.receive("tempo 120 1 0.250\n")         # a chart that began at 0.25 s: its bars count from there
+        clicks = []
+        for ms in range(3300, 4400, 2):
+            self.out.messages = []
+            self.duo.tick(100.0 + ms / 1000)
+            clicks += [(ms, m[1]) for m, channel in self.out.messages if channel == main.DRUMS and m[0] == 0x90]
+        self.assertEqual(clicks, [(3750, 77), (4250, 76)])
         self.duo.receive("tempo 120 0\n")
         self.out.messages = []
         self.duo.tick(103.5)

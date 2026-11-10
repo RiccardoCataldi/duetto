@@ -247,7 +247,7 @@ class DuoSessionTest(unittest.TestCase):
         from music_transformer.chart import CHARTS
         tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'autumn_leaves')
         self.session.turn(chart=tune + 1)
-        self.assertEqual((self.session.bpm, self.session.state()['chord']), (120, 'Cm7 → F7'))
+        self.assertEqual((self.session.pace, self.session.state()['chord']), (120, 'Cm7 > F7'))
         self.clock.t = 10.2                          # bar 6 of 2 s each: D7, whose F# is not in G minor
         self.session.hear(10.2, 0.3, 62)
         self.assertEqual(self.session.state()['key'], 'Autumn Leaves 6/32')

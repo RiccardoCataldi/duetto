@@ -25,7 +25,7 @@ class ServerTest(unittest.TestCase):
             with socket.create_connection(duo.server_address, timeout=10) as sock:
                 sock.sendall(b"on 0.000 0.300 60 80\n")
                 lines = sock.makefile('r')
-                self.assertEqual(lines.readline(), "tempo 0 0\n")
+                self.assertEqual(lines.readline(), "tempo 0 0 0.000\n")
                 kind, onset, duration, pitch, hand, velocity = lines.readline().split()
                 self.assertEqual(kind, 'note')
                 self.assertIn(hand, ('left', 'right'))

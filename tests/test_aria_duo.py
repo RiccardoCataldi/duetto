@@ -428,16 +428,23 @@ class AriaSessionTest(unittest.TestCase):
         tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'autumn_leaves')
         self.assertEqual(len(CHARTS[tune].bars), 32)
         self.session.turn(chart=tune + 1, chord_tone=4.0, apart=0)
-        self.assertEqual((self.session.bpm, self.session.metronome), (120, 1))
-        self.assertEqual(self.session.state()['chord'], 'Cm7 → F7')
+        self.assertEqual((self.session.bpm, self.session.metronome, self.session.pace), (0, 0, 120))   # your knobs
+        self.assertEqual(self.session.state()['chord'], 'Cm7 > F7')
         self.clock.t = 10.2                          # bar 6 of 2 s each: D7, whose F# is not in G minor
         self.assertEqual(self.session.state()['key'], 'Autumn Leaves 6/32')
         self.session.hear(10.2, 0.3, 62, 80)
         bias = self.session._partner(self.session.now() + 30)
         self.assertGreater(bias[66], bias[65] + 3)   # F# over F
         self.assertLess(bias[67], bias[65])          # G, a semitone over its third: an avoid note
+        self.session.turn(bpm=60)                    # half the tempo: the same bar, twice as long
+        state = self.session.state()
+        self.assertEqual((state['bpm'], state['chart']['bar'], state['chart']['bars'][5]), (60, 5, ['D7']))
+        self.clock.t = 13.0
+        self.assertEqual(self.session.state()['chart']['bar'], 5)
+        self.assertAlmostEqual(self.session.began, 10.2 - 2 * 10.2)
         self.session.turn(chart=0)
         self.assertIsNone(self.session.listener.chart)
+        self.assertNotIn('chart', self.session.state())
 
     def test_with_wait_it_takes_turns_with_you(self):
         self.session.turn(wait=80)
