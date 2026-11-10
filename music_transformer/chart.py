@@ -75,7 +75,7 @@ def bar_at(session, seconds):
 
 
 PHRASE = 2 * BEATS   # beats a soloist keeps to one way of playing the changes: two bars
-WAYS = ('scale', 'scale', 'arpeggio', 'pentatonic', 'blues', 'blues')   # the ways, as often as each is here
+WAYS = ('bebop',) * 6 + ('scale', 'arpeggio', 'pentatonic', 'blues')   # the ways, as often as each is here
 
 
 def beats(session, seconds):

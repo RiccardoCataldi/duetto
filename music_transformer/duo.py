@@ -16,7 +16,7 @@ from anticipation.config import CONTEXT_SIZE, MAX_DUR, MAX_PITCH, MAX_TIME, TIME
 from anticipation.vocab import AUTOREGRESS, DUR_OFFSET, NOTE_OFFSET, TIME_OFFSET
 from anticipation.sample import safe_logits, nucleus
 
-from music_transformer import chart
+from music_transformer import bebop, chart
 from music_transformer.listener import BASS_TOP, CHART_FORCE
 from music_transformer.listener import FORCED, NAMES, STAY, Listener, hands
 from music_transformer.memory import Memory
@@ -79,6 +79,8 @@ PITCHES = torch.arange(MAX_PITCH, dtype=torch.float)
 APPROACH = 1.5    # logit taken from a key a semitone from a chord tone, off the beat: a chromatic approach, now and then
 RESOLVE = 6.0     # logit added to the chord tone it approached: the next note lands on it
 TARGET = 1.5      # logit added to the chord's tones on the beat
+STYLE = 1.5       # how much it takes its notes over each chord from bebop soloists' habits (bebop.py)
+LINE = 1.5        # and how its line moves from one note to the next
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does
 KNOBS = {
@@ -489,11 +491,17 @@ class DuoSession:
         chord_tone = max(self.chord_tone, chart.CHANGES) if self.chart else self.chord_tone
         solos = self.chart and right and (self.part == 2 or self.part == 1 and not you_play)
         way = chart.way(self, at) if solos else None
-        bias = torch.tensor(self.listener.bias(at, chord_tone, self.tension, self.out_of_key, way)[:MAX_PITCH]
+        if way == 'bebop':
+            chord_tone = 0   # what it plays over the chord comes from the soloists' habits instead (_bebop)
+        bias = torch.tensor(self.listener.bias(at, chord_tone, 0 if way == 'bebop' else self.tension, self.out_of_key,
+                                               way)[:MAX_PITCH]
                             + (0 if expected is None else self.recall * np.tile(expected, 11)[:MAX_PITCH]),
                             dtype=torch.float) + self._register(tick, you_play, register, right)
         if solos:
-            bias += self._approach(at, line, way)
+            bias += self._bebop(at) if way == 'bebop' else self._approach(at, line, way)
+            if line and tick - line[-1][0] < 2 * 60 / self.pace * TIME_RESOLUTION:   # its line goes on: mostly by step
+                bias += LINE * torch.tensor(bebop.moves((line[-1][1] - NOTE_OFFSET) % MAX_PITCH)[:MAX_PITCH],
+                                            dtype=torch.float)
         if not you_play and right and line and tick - self.heard_at < self.answer:
             phrase = self.listener.phrase(at)
             answered = sum(time_ > self.heard_at for time_, _ in line)
@@ -505,6 +513,19 @@ class DuoSession:
                 if 0 <= echo < MAX_PITCH:
                     bias[echo] += self.echo
         return bias.to(self.device)
+
+    def _bebop(self, at):
+        """Logits added to its pitches when it solos as bebop players do (bebop.py): each step of the chord as often
+        as they play it, on the beat or off it; in the half beat before a change of chord, the next chord's as much
+        as this one's: it hears it coming."""
+        beat = chart.beats(self, at)
+        on = abs(beat - round(beat)) < 0.15
+        root, kind, _ = self.listener.harmony(at)
+        steps = bebop.degrees(root, kind, on)
+        coming = self.listener.harmony(at + 30 / self.pace)
+        if coming[:2] != (root, kind):
+            steps = (steps + bebop.degrees(coming[0], coming[1], on)) / 2
+        return STYLE * torch.tensor(np.tile(steps, 11)[:MAX_PITCH], dtype=torch.float) * (PITCHES >= BASS_TOP)
 
     def _approach(self, at, line, way):
         """Logits added to its pitches when it solos over a tune, for the chromatic approach: off the beat, a key a

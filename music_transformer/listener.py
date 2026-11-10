@@ -218,7 +218,7 @@ class Listener:
 
     def palette(self, now, name):
         """Over a chart: for each pitch class, 1 if a soloist playing `name` plays it over the chord at `now`.
-        'scale': the chord's scale; 'arpeggio': the chord; 'pentatonic': the pentatonic on the chord's root; 'blues'
+        'bebop': anything (the session weighs the notes); 'scale': the chord's scale; 'arpeggio': the chord; 'pentatonic': the pentatonic on the chord's root; 'blues'
         and 'major_pentatonic': the blues scale and the major pentatonic of the tune's key, whatever the chord."""
         root, kind, tones = self.harmony(now)
         tonic = self.chart[1] % 12 if self.chart[1] is not None else root
@@ -229,6 +229,8 @@ class Listener:
                 kind != 'maj7' else FORCED['major_pentatonic']
         elif name in ('blues', 'major_pentatonic'):
             steps, root, tones = FORCED[name], tonic, ()
+        elif name == 'bebop':   # any note: the session weighs them as bebop soloists do (bebop.py)
+            return np.ones(12)
         else:
             return self.chord_scale(now)
         scale = np.array([(pc - root) % 12 in steps for pc in range(12)], float)
@@ -253,7 +255,7 @@ class Listener:
             root = np.array([p % 12 == harmony[0] for p in range(128)]) + 0.5 * np.array(
                 [p % 12 == (harmony[0] + 7) % 12 and p % 12 in chord for p in range(128)])
             low = bass * (ROOT * root - CHART_FORCE * np.array([p % 12 not in chord for p in range(128)]))
-            avoid = {(tone + 1) % 12 for tone in chord} - chord - colours
+            avoid = set() if palette == 'bebop' else {(tone + 1) % 12 for tone in chord} - chord - colours
             return low + np.array([chord_tone * (p % 12 in chord) + tension * (p % 12 in colours)
                                    - AVOID * (p % 12 in avoid) - CHART_FORCE * (1 - in_key[p % 12]) for p in range(128)])
         avoid = {(tone + 1) % 12 for tone in chord} - chord - colours

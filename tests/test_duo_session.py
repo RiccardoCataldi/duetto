@@ -270,6 +270,20 @@ class DuoSessionTest(unittest.TestCase):
         comps = self.session._partner(self.session._tick(0.27), [], (0, 127), False)   # its left hand does not
         self.assertLess(comps[68], -5)
 
+    def test_soloing_as_bebop_players_do_its_line_moves_by_step_and_hears_the_next_chord_coming(self):
+        from music_transformer.chart import CHARTS
+        tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'blues_in_f')   # 110 bpm: F7, then Bb7
+        self.session.turn(chart=tune + 1, part=2, hands=1, apart=0, lead=0)
+        self.session.hear(0.0, 0.3, 53)
+        self.enterContext(unittest.mock.patch('music_transformer.chart.way', return_value='bebop'))
+        line = [(20, NOTE_OFFSET + 4 * MAX_PITCH + 72)]             # it has just played C5
+        bias = self.session._partner(self.session._tick(0.4), line, (0, 127), True)
+        self.assertGreater(min(bias[70], bias[74]), max(bias[72], bias[84], bias[60]))   # a step, not C again or a leap
+        self.assertGreater(bias[70], -4)                            # Bb, F7's fourth: bebop plays it, the scales held it back
+        free = self.session._partner(self.session._tick(0.4), [], (0, 127), True)
+        late = self.session._partner(self.session._tick(2.1), [], (0, 127), True)   # Bb7 is a tenth of a second away
+        self.assertGreater(late[68] - late[69], free[68] - free[69])   # Ab, its seventh, gains on A
+
     def test_soloing_over_a_tune_it_runs_in_triplets_or_sixteenths_for_a_phrase(self):
         from music_transformer.chart import CHARTS
         tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'autumn_leaves')   # 120 bpm: a beat is 0.5 s
