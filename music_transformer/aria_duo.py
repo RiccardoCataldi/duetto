@@ -65,7 +65,7 @@ KNOBS = {
     'space': (15, 0, 150, 'ticks', "time between its onsets while you play"),
     'chord': (3, 1, 8, 'notes', "most notes it starts at once while you play: its comping"),
     'solo_chord': (2, 1, 8, 'notes', "most notes it starts at once when you leave it room: lines and arpeggios"),
-    'out_of_key': (1.5, 0.0, 6.0, '', "how strongly it keeps to your key"),
+    'out_of_key': (4.0, 0.0, 6.0, '', "how strongly it keeps to your key"),
     'chord_tone': (0.5, 0.0, 4.0, '', "how much it leans on the chord you play"),
     'tension': (0.5, 0.0, 4.0, '', "how much it colours your chord with its 9th, 11th and 13th"),
     'apart': (2.0, 0.0, 6.0, '', "how firmly it keeps apart from your hands, and under your melody, while you play"),

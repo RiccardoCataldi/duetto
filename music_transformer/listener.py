@@ -197,8 +197,9 @@ class Listener:
             colours &= set(np.flatnonzero(in_key))
             out_of_key = max(out_of_key, FORCE)
         avoid = {(tone + 1) % 12 for tone in chord} - chord - colours
+        free = colours if self.forced else colours | chord   # the chord you play is never out of your key
         return np.array([chord_tone * (p % 12 in chord) + tension * (p % 12 in colours) - AVOID * (p % 12 in avoid)
-                         - out_of_key * (1 - in_key[p % 12]) * (p % 12 not in colours) for p in range(128)])
+                         - out_of_key * (1 - in_key[p % 12]) * (p % 12 not in free) for p in range(128)])
 
     @staticmethod
     def chord_name(tones):
