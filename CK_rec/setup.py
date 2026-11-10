@@ -30,7 +30,10 @@ class Setup(object):
         selected_midiport = -1
         while selected_midiport < 0:
             try:
-                choice = input("Please choose the MIDI device (number) you want to use and hit Enter:")
+                choice = input("Please choose the MIDI device (number) you want to use and hit Enter "
+                               "(just Enter: none, you play the laptop's keyboard in the piano roll):")
+                if not choice.strip():
+                    return None
                 selected_midiport = int(choice)
                 if selected_midiport < 0 or selected_midiport >= len(self.__ports):
                     print("Invalid number, please try again:")

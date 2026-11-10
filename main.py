@@ -10,6 +10,7 @@ import time
 from collections import deque
 
 import mido
+import rtmidi
 
 import sound
 from CK_rec.setup import Setup
@@ -22,6 +23,7 @@ GENERATED_PROGRAM = 0    # Acoustic Grand Piano too: a duo of two pianos, you on
 INPUT_CONTROLS = ((10, 40),)                                  # pan
 GENERATED_CONTROLS = ((7, 100), (10, 88), (91, 70), (93, 0))  # volume, pan, reverb send, chorus send
 PEDAL = 64               # the sustain pedal's control
+KEYS = 'duetto keys'     # our MIDI port for the laptop's keyboard (pianoroll.py plays into it)
 PLUG_S = 1.0             # how often we look whether your keyboard was unplugged or plugged back in
 RING = 1.6               # its notes ring this much longer than the model wrote them, as if with a light pedal
 RING_S = 0.4             # and at least this many seconds more
@@ -230,8 +232,10 @@ def connect(address):
 if __name__ == "__main__":
     codeK = Setup()
     myPort = codeK.perform_setup()
-    codeK.open_port(myPort)
-    keyboard = codeK.port_name(myPort)
+    keyboard = None                # no MIDI keyboard: the laptop's, in the piano roll
+    if myPort is not None:
+        codeK.open_port(myPort)
+        keyboard = codeK.port_name(myPort)
 
     midiRec = CK_rec(myPort, 0x90, debug=False)
     midiRec.set_input_instrument(INPUT_PROGRAM)
@@ -264,7 +268,11 @@ if __name__ == "__main__":
             midiRec.play_midi_message([0xB0 | midiRec.input_channel, PEDAL, velocity])
             duo.sustain(velocity, time.monotonic())
 
-    codeK.set_callback(on_midi)
+    if keyboard:
+        codeK.set_callback(on_midi)
+    keys = rtmidi.MidiIn()         # the laptop's keyboard, which the piano roll plays into this port of ours (M)
+    keys.open_virtual_port(KEYS)
+    keys.set_callback(on_midi)
     # run_duet.sh starts us in the background, where SIGINT is ignored: stop and save on SIGINT or SIGTERM anyway
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, signal.default_int_handler)
@@ -277,7 +285,9 @@ if __name__ == "__main__":
             duo.tick(now)
             if now - looked > PLUG_S:
                 looked = now
-                if plugged and not codeK.present(keyboard):
+                if not keyboard:
+                    pass
+                elif plugged and not codeK.present(keyboard):
                     plugged = False
                     print("Keyboard unplugged: waiting for it to come back")
                     # its last note-offs never came: let go of the keys and the pedal it was holding
@@ -291,6 +301,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     finally:
+        keys.close_port()
         codeK.end()
         duo.stop(time.monotonic())
         sock.close()

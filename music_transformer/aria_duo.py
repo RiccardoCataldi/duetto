@@ -8,6 +8,8 @@ you press them and the part of its line that has not sounded yet is thrown away 
 
 It jams as a partner does: it plays in phrases and breathes between them, keeps the plan it has begun when you play,
 plays as loud as you do, answers your phrase with your intervals when you rest, and stops a while after you do.
+Aria learnt one pianist at a time: with `wait` it takes turns with you instead, playing once you rest and giving way
+as you play again.
 
 Aria's tokens: each note is (piano, pitch, velocity), then its onset in ms within a 5 s segment, then its duration;
 <T> starts the next segment. Here times are ticks of 10 ms (Aria's step) since `base`; on the wire, seconds since
@@ -68,6 +70,7 @@ KNOBS = {
     'grid': (20, 0, 20, 'ticks', "how far off your pulse its onsets may land (20: free, as Aria plays)"),
     'stay': (STAY, 0.80, 0.995, '', "how sure it must be you modulated (lower = sooner)"),
     'max_rest': (300, 50, 800, 'ticks', "the longest silence it may leave"),
+    'wait': (0, 0, 300, 'ticks', "how long you rest before it plays: 0, it plays along with you; more, you take turns"),
     'phrase': (12, 2, 64, 'notes', "about how many notes or chords it plays before it takes a breath"),
     'breath': (150, 0, 800, 'ticks', "the silence that ends its phrase"),
     'timeout': (1000, 100, NEVER, 'ticks', "how long it plays on after your last note; at the top, for good"),
@@ -85,11 +88,11 @@ KNOBS = {
     'bpm': (0, 0, 240, 'bpm', "the tempo its grid keeps to: yours as it hears it, or one you fix"),
     'metronome': (0, 0, 1, 'choice:off/on', "a click on each beat of the tempo you fix"),
 }
-IN_EFFECT = {'listening': set(), 'accompanying': {'space', 'apart', 'chord', 'commit'},
+IN_EFFECT = {'listening': set(), 'accompanying': {'space', 'apart', 'chord', 'commit'}, 'waiting': set(),
              'answering': {'min_step', 'solo_chord', 'lead', 'answer', 'echo', 'timeout'},
              'alone': {'min_step', 'solo_chord', 'lead', 'answer', 'timeout'}}
 ALWAYS = {'out_of_key', 'chord_tone', 'tension', 'stay', 'max_rest', 'temperature', 'min_p', 'lowest', 'highest',
-          'phrase', 'breath', 'follow', 'scale', 'bpm'}
+          'phrase', 'breath', 'follow', 'scale', 'bpm', 'wait'}
 
 
 def knob(name, value):
@@ -168,8 +171,8 @@ class AriaSession:
                     'active': sorted(ALWAYS)}
         now = self.now()
         at = self._seconds(now)
-        if now - self.heard_at < PLAYING:
-            mode = 'accompanying'
+        if now - self.heard_at < (self.wait or PLAYING):
+            mode = 'waiting' if self.wait else 'accompanying'
         elif self._timed_out(now):
             mode = 'listening'
         elif now - self.heard_at < self.answer and len(self.listener.phrase(at)) > 1:
@@ -202,7 +205,8 @@ class AriaSession:
     def hear(self, onset, duration, pitch, velocity=80):
         """Your note, pressed at `onset`: Aria hears it when you played it, before those of its notes already on their
         way that come after it. Returns the time from which its unplayed notes are dropped, or None: its plan stands
-        for `commit` ticks, as long as your note does not put one of its notes out of your key."""
+        for `commit` ticks, as long as your note does not put one of its notes out of your key; not at all when it
+        takes turns with you (`wait`)."""
         self.listener.hear(onset, duration, pitch)
         tick = round(onset * 100)
         if self.base is None:
@@ -213,7 +217,8 @@ class AriaSession:
         self._add((self.heard_at, False, pitch, _velocity(velocity), _duration(duration)))
         for event in later:
             if event[1] and event[0] > now + MARGIN and (
-                    cut is not None or event[0] > now + self.commit or bias[event[2]] < -self.out_of_key / 2):
+                    cut is not None or self.wait or event[0] > now + self.commit
+                    or bias[event[2]] < -self.out_of_key / 2):
                 cut = event[0] if cut is None else cut   # its own, not sounded yet: sampled again, now hearing you
             else:
                 self._add(event)
@@ -244,6 +249,8 @@ class AriaSession:
         now, last = self.now(), self._last()
         you_play = self.heard_at is not None and now - self.heard_at < PLAYING
         earliest = max(last, now + MARGIN)
+        if self.wait and self.heard_at is not None:   # its turn: once you have rested `wait`, on its own
+            earliest, you_play = max(earliest, self.heard_at + self.wait), False
         latest = max(earliest, last + self.max_rest)
         mine = [e for e in self.events if e[1]]
         step, most = (self.space, self.chord) if you_play else (self.min_step, self.solo_chord)

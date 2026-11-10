@@ -402,6 +402,16 @@ class AriaSessionTest(unittest.TestCase):
         self.assertTrue(all((pitch - 5) % 12 in aria_duo.FORCED['blues'] for pitch in pitches), pitches)
         self.assertEqual(self.session.state()['bpm'], 120)
 
+    def test_with_wait_it_takes_turns_with_you(self):
+        self.session.turn(wait=80)
+        self.session.hear(0.0, 0.3, 60, 80)
+        notes = self.fill()
+        self.assertGreaterEqual(min(note[0] for note in notes), 0.8 - 1e-9)   # once you have rested
+        self.assertEqual(self.session.state()['mode'], 'waiting')
+        self.clock.t = 0.5
+        self.assertAlmostEqual(self.session.hear(0.5, 0.3, 62, 80), notes[0][0])   # it gives way: all of its plan
+        self.assertGreaterEqual(min(note[0] for note in self.fill()), 1.3 - 1e-9)
+
     def test_knobs_hold_from_the_start_and_stay_within_their_range(self):
         session = AriaSession(UniformModel(), clock=self.clock, min_p=2.0, genre=None)
         self.assertEqual(session.knobs()['min_p'], 0.3)

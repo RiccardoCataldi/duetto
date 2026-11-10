@@ -47,7 +47,8 @@ sleep 3
 SYNTH=$(aconnect -o | awk -F'[ :]' '/FLUID Synth/ {print $2; exit}')
 aconnect 14:0 "$SYNTH:0" && echo "Midi Through -> FluidSynth ($SYNTH:0)"
 
-KEYSTEP=$(.venv/bin/python -c "import rtmidi; print(next(i for i, p in enumerate(rtmidi.MidiIn().get_ports()) if 'KeyStep' in p))")
+# the KeyStep if it is plugged in; without it, the laptop's keyboard in the piano roll (M)
+KEYSTEP=$(.venv/bin/python -c "import rtmidi; print(next((i for i, p in enumerate(rtmidi.MidiIn().get_ports()) if 'KeyStep' in p), ''))")
 echo "$KEYSTEP" | AMT_SERVER=localhost:8765 PYTHONUNBUFFERED=1 setsid nohup .venv/bin/python main.py > "$LOG/duet.log" 2>&1 &
 sleep 4
 grep -E "chosen|output opened|Playing with" "$LOG/duet.log"

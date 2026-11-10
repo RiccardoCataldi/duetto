@@ -37,6 +37,9 @@ FELT = (112, 30, 44)      # the strip of red felt over the keys
 GRID = (255, 255, 255, 12)
 
 PLAYERS = {0: ('You', 'piano', YOU), 1: ('AI', 'piano', AI)}
+KEYS = 'duetto keys'      # main.py's MIDI port for the laptop's keyboard
+# the laptop's keyboard as a piano, as in Ableton Live: a row of white keys with the black ones above it, from C
+NOTE_KEYS = {key: step for step, key in enumerate('awsedftgyhujkolp')}
 
 
 def is_black(pitch):
@@ -184,7 +187,8 @@ class Roll:
         if clock is not None:
             stamp = theme.text(screen, f"{int(clock) // 60}:{int(clock) % 60:02d}", 15, TEXT, (right, 21), bold=True,
                                anchor='topright')
-            theme.text(screen, self.hint or 'duetto', 12, MUTED, (right, stamp.bottom + 1), anchor='topright')
+            hint = theme.text(screen, self.hint or 'duetto', 12, MUTED, (right, stamp.bottom + 1), anchor='topright')
+            right = min(right, hint.left + 74)   # a long hint takes room from the readout
         if self.readout:
             self._readout(screen, x, right - 90)
         elif self.offline:
@@ -257,6 +261,37 @@ def notes_from_midi(path):
     return notes
 
 
+class Typing:
+    """The laptop's keyboard as a piano, as in Ableton Live: A W S E D F T G Y H U J K O L P are the keys from C,
+    Z and X go an octave down and up, C and V play softer and louder. `send` takes a MIDI message."""
+
+    def __init__(self, send):
+        self.send = send
+        self.octave, self.velocity = 5, 100   # A is middle C
+        self.down = {}                         # key -> the pitch it plays, while it is held
+
+    def handles(self, key):
+        return key in NOTE_KEYS or key in ('z', 'x', 'c', 'v')
+
+    def key(self, key, pressed):
+        if pressed and key in NOTE_KEYS and key not in self.down:
+            self.down[key] = 12 * self.octave + NOTE_KEYS[key]
+            self.send([0x90, self.down[key], self.velocity])
+        elif not pressed and key in self.down:
+            self.send([0x80, self.down.pop(key), 0])
+        elif pressed and key in ('z', 'x'):
+            self.octave = min(max(self.octave + (1 if key == 'x' else -1), 0), 9)
+        elif pressed and key in ('c', 'v'):
+            self.velocity = min(max(self.velocity + (20 if key == 'v' else -20), 20), 120)
+
+    def release(self):
+        for key in list(self.down):
+            self.key(key, False)
+
+    def says(self):
+        return f"M: keys off · Z X: C{self.octave - 1} · C V: velocity {self.velocity}"
+
+
 class Live:
     """The notes heard on a MIDI port, kept while they are on screen."""
 
@@ -311,6 +346,8 @@ def live(port_name, server):
 
     midi.set_callback(hear)
     panel, shown = Panel(server, engine), True
+    keys = rtmidi.MidiOut()   # the laptop's keyboard plays into main.py, as a MIDI keyboard would
+    typing, typed = Typing(keys.send_message), False
 
     def layout():
         width, height = screen.get_size()
@@ -323,6 +360,15 @@ def live(port_name, server):
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 return
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_m:
+                port = next((i for i, p in enumerate(keys.get_ports()) if KEYS in p), None)
+                if not keys.is_port_open() and port is not None:   # main.py is playing
+                    keys.open_port(port)
+                typed = not typed and keys.is_port_open()
+                typing.release()
+            elif typed and event.type in (pygame.KEYDOWN, pygame.KEYUP) and typing.handles(pygame.key.name(event.key)):
+                typing.key(pygame.key.name(event.key), event.type == pygame.KEYDOWN)
+                continue   # F and K are keys of the piano now
             if event.type == pygame.KEYDOWN and event.key in (pygame.K_f, pygame.K_k):
                 if event.key == pygame.K_f:
                     pygame.display.toggle_fullscreen()
@@ -337,7 +383,7 @@ def live(port_name, server):
         roll.instruments = {player: sound.GM[engine.sound[player]['instrument']] for player in PLAYERS}
         roll.readout = panel.mind.readout()
         roll.offline = None if panel.mind.knobs else 'Connecting to the model…'
-        roll.hint = None if shown else 'K: show the controls'
+        roll.hint = typing.says() if typed else 'M: play the laptop keys' if shown else 'K: show the controls'
         mind = {name: round(knob.value) for name, knob in panel.mind.knobs.items() if name in ('lowest', 'highest')}
         if len(mind) == 2:
             low, high = sorted(mind.values())

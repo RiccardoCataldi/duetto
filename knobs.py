@@ -99,7 +99,7 @@ ENGINE_TURNS = {'aria': {
     'risk': {'temperature': (0.7, 0.95, 1.3), 'min_p': (0.1, 0.035, 0.0)},
 }}
 MODES = {'listening': 'waiting for you to play', 'accompanying': 'accompanying you', 'answering': 'answering you',
-         'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn'}
+         'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn', 'waiting': 'your turn'}
 
 # the sections of the tabs: the model's knobs on the AI mind tab and in Advanced, and each one's sound
 REGISTER = ('lowest', 'highest', 'root', 'scale', 'bpm', 'metronome')
