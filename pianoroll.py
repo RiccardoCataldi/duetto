@@ -289,7 +289,7 @@ class Typing:
             self.key(key, False)
 
     def says(self):
-        return f"M: keys off · Z X: C{self.octave - 1} · C V: velocity {self.velocity}"
+        return f"A W S E D…: piano · Z X: C{self.octave - 1} · C V: velocity {self.velocity}"
 
 
 class Live:
@@ -347,7 +347,15 @@ def live(port_name, server):
     midi.set_callback(hear)
     panel, shown = Panel(server, engine), True
     keys = rtmidi.MidiOut()   # the laptop's keyboard plays into main.py, as a MIDI keyboard would
-    typing, typed = Typing(keys.send_message), False
+    typing = Typing(keys.send_message)
+
+    def plug():
+        port = next((i for i, p in enumerate(keys.get_ports()) if KEYS in p), None)
+        if not keys.is_port_open() and port is not None:   # main.py is playing
+            keys.open_port(port)
+        return keys.is_port_open()
+
+    typed = plug()   # on whenever main.py plays: F and K are keys of the piano then, F11 and Tab stand in for them
 
     def layout():
         width, height = screen.get_size()
@@ -360,17 +368,13 @@ def live(port_name, server):
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 return
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_m:
-                port = next((i for i, p in enumerate(keys.get_ports()) if KEYS in p), None)
-                if not keys.is_port_open() and port is not None:   # main.py is playing
-                    keys.open_port(port)
-                typed = not typed and keys.is_port_open()
-                typing.release()
-            elif typed and event.type in (pygame.KEYDOWN, pygame.KEYUP) and typing.handles(pygame.key.name(event.key)):
+            if not typed and event.type == pygame.KEYDOWN:
+                typed = plug()   # main.py started after us
+            if typed and event.type in (pygame.KEYDOWN, pygame.KEYUP) and typing.handles(pygame.key.name(event.key)):
                 typing.key(pygame.key.name(event.key), event.type == pygame.KEYDOWN)
                 continue   # F and K are keys of the piano now
-            if event.type == pygame.KEYDOWN and event.key in (pygame.K_f, pygame.K_k):
-                if event.key == pygame.K_f:
+            if event.type == pygame.KEYDOWN and event.key in (pygame.K_f, pygame.K_k, pygame.K_F11, pygame.K_TAB):
+                if event.key in (pygame.K_f, pygame.K_F11):
                     pygame.display.toggle_fullscreen()
                 else:
                     shown = not shown
@@ -383,7 +387,7 @@ def live(port_name, server):
         roll.instruments = {player: sound.GM[engine.sound[player]['instrument']] for player in PLAYERS}
         roll.readout = panel.mind.readout()
         roll.offline = None if panel.mind.knobs else 'Connecting to the model…'
-        roll.hint = typing.says() if typed else 'M: play the laptop keys' if shown else 'K: show the controls'
+        roll.hint = typing.says() if typed else None if shown else 'K: show the controls'
         mind = {name: round(knob.value) for name, knob in panel.mind.knobs.items() if name in ('lowest', 'highest')}
         if len(mind) == 2:
             low, high = sorted(mind.values())

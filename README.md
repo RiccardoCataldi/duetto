@@ -45,7 +45,7 @@ aconnect "Midi Through" "FLUID Synth"                            # the duo's sou
 .venv/bin/python pianoroll.py                                    # terminal 3: the piano roll and the knobs
 ```
 
-No MIDI keyboard? Press Enter in `main.py` instead of picking one, then M in the piano roll: the laptop's keyboard plays, as in Ableton Live (A W S E D F T G Y H U J K O L P from C, Z and X an octave down and up, C and V softer and louder).
+No MIDI keyboard? Press Enter in `main.py` instead of picking one, and the laptop's keyboard plays in the piano roll, as in Ableton Live (A W S E D F T G Y H U J K O L P from C, Z and X an octave down and up, C and V softer and louder).
 
 <details>
 <summary>Setup</summary>
@@ -62,7 +62,7 @@ No MIDI keyboard? Press Enter in `main.py` instead of picking one, then M in the
 
 ![The piano roll with the knobs](samples/duo/pianoroll-knobs.png)
 
-The top of the piano roll says what the model hears (key, chord, tempo) and what it is doing. Keys: F fullscreen, K show or hide the controls, M play the laptop's keyboard as a piano (F and K are then its keys), Esc close.
+The top of the piano roll says what the model hears (key, chord, tempo) and what it is doing. Keys: F fullscreen, K show or hide the controls, the laptop's keyboard is a piano while `main.py` plays (F and K are then its keys: F11 and Tab stand in for them), Esc close.
 
 Controls are sliders (drag them; hold Shift to drag finely) and steppers (click the arrows). The arrow keys or Ctrl and the wheel over a control turn it; the wheel alone scrolls the panel. A double click resets a control, and the bottom of the panel says what the control under the mouse does. A control is dimmed while what it shapes is not happening.
 
