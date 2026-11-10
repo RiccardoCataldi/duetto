@@ -227,6 +227,7 @@ def connect(address):
     host, port = address.rsplit(':', 1)
     sock = socket.create_connection((host, int(port)))
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    sock.sendall(b"hello\n")   # the duo begins now, not at your first key: over a tune it may start by itself
     print(f"Playing with the model's server at {address} (its log says which model)")
     return sock, time.monotonic()
 

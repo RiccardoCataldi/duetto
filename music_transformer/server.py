@@ -6,6 +6,8 @@ Serve the duo over TCP so the model can run on another machine (e.g. a Jetson).
     ssh -N -L 8765:localhost:8765 jetson          # on the laptop, then AMT_SERVER=localhost:8765
 
 One line per message, times in seconds since the connection opened:
+    client -> server   "hello"                           the duo begins (any first line does; without it, at your
+                                                         first key)
     client -> server   "on <onset> <duration> <pitch> <velocity>"   you pressed a key (the duration is a guess)
     client -> server   "off <onset> <pitch> <duration>"  the key you pressed at <onset> stopped sounding (pedal and all)
     server -> client   "note <onset> <duration> <pitch> <hand> [<velocity>]"   the model's next note, of its left or
