@@ -161,6 +161,21 @@ class ChartTest(unittest.TestCase):
         self.assertGreater(bias[62], -1)              # up there D is a note of the line
 
 
+class PaletteTest(unittest.TestCase):
+    def test_a_soloist_plays_the_changes_in_more_ways_than_the_chords_scale(self):
+        listener = Listener()
+        listener.chart = (lambda now: (10, '7'), 5)   # Bb7 in a blues in F
+        ways = {name: sorted(np.flatnonzero(listener.palette(0.0, name))) for name in
+                ('scale', 'arpeggio', 'pentatonic', 'blues', 'major_pentatonic')}
+        self.assertEqual(ways['scale'], [0, 2, 3, 5, 7, 8, 10])           # Bb mixolydian
+        self.assertEqual(ways['arpeggio'], [2, 5, 8, 10])
+        self.assertEqual(ways['pentatonic'], [0, 2, 5, 7, 8, 10])         # Bb major pentatonic, and the chord's Ab
+        self.assertEqual(ways['blues'], [0, 3, 5, 8, 10, 11])             # F blues, whatever the chord
+        self.assertEqual(ways['major_pentatonic'], [0, 2, 5, 7, 9])       # F major pentatonic
+        self.assertLess(listener.bias(0.0, 1.0, 1.0, 2.0, 'blues')[62], -8)   # D4 is not in F blues
+        self.assertGreater(listener.bias(0.0, 1.0, 1.0, 2.0, 'blues')[68], -1)       # Ab4 is, and is Bb7's seventh
+
+
 class AvoidTest(unittest.TestCase):
     def test_over_your_c_minor_the_major_third_clashes_whatever_the_key(self):
         listener = Listener()

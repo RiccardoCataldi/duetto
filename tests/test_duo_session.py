@@ -254,6 +254,22 @@ class DuoSessionTest(unittest.TestCase):
         bias = self.session._partner(self.session.now() + 30, [], (0, 127), True)
         self.assertGreater(bias[66], bias[65] + 1)
 
+    def test_soloing_over_a_tune_it_approaches_a_chord_tone_by_a_semitone_and_lands_on_it(self):
+        from music_transformer.chart import CHARTS
+        tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'blues_in_f')
+        self.session.turn(chart=tune + 1, part=2, hands=1, apart=0, lead=0)   # F7 in the first bar
+        self.session.hear(0.0, 0.3, 53)
+        self.enterContext(unittest.mock.patch('music_transformer.chart.way', return_value='scale'))
+        off = self.session._partner(self.session._tick(0.27), [], (0, 127), True)   # the "and" of the first beat
+        on = self.session._partner(self.session._tick(0.55), [], (0, 127), True)    # the second beat
+        self.assertGreater(off[68], on[68] + 5)      # Ab4, a semitone under A: only off the beat
+        self.assertGreater(on[69], off[69])          # on the beat the chord's tones are its targets
+        line = [(27, NOTE_OFFSET + 4 * MAX_PITCH + 68)]
+        landed = self.session._partner(self.session._tick(0.55), line, (0, 127), True)
+        self.assertEqual(int(landed.argmax()), 69)   # after Ab, A
+        comps = self.session._partner(self.session._tick(0.27), [], (0, 127), False)   # its left hand does not
+        self.assertLess(comps[68], -5)
+
     def test_when_you_let_go_it_hears_how_long_your_note_really_was(self):
         self.session.hear(0.0, 0.3, 60)
         list(self.fill())

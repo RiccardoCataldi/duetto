@@ -99,7 +99,8 @@ class Listener:
         self.releases = False   # whether you say when your notes stop sounding (main.py does)
         self.move = MOVE
         self.forced = None      # (root, scale in FORCED) it keeps to instead of your key
-        self.tempo = None       # seconds a beat of a tempo you fix lasts, its beats from time 0 on; None: your pulse
+        self.tempo = None       # seconds a beat of a tempo you fix lasts, a beat on `origin`; None: your pulse
+        self.origin = 0.0
         self.said = None        # the key it says you are in (said_key)
         self.chart = None       # (chord(now) -> (root, kind), key) of a chart it follows instead of your chord and key
 
@@ -111,9 +112,9 @@ class Listener:
         """Keeps it to `scale` (in FORCED) from `root` (0 = C) instead of your key; None for your key again."""
         self.forced = (root % 12, scale) if scale else None
 
-    def fix(self, bpm):
-        """Keeps it to `bpm` instead of your pulse; 0 for your pulse again."""
-        self.tempo = 60 / bpm if bpm else None
+    def fix(self, bpm, origin=0.0):
+        """Keeps it to `bpm` instead of your pulse, a beat falling on `origin`; 0 for your pulse again."""
+        self.tempo, self.origin = 60 / bpm if bpm else None, origin
 
     def hear(self, onset, duration, pitch):
         """Your note. Once release() has been heard, it sounds on past `duration` until its own release() comes."""
@@ -215,9 +216,28 @@ class Listener:
         scale[list(tones)] = 1
         return scale
 
-    def bias(self, now, chord_tone, tension, out_of_key):
+    def palette(self, now, name):
+        """Over a chart: for each pitch class, 1 if a soloist playing `name` plays it over the chord at `now`.
+        'scale': the chord's scale; 'arpeggio': the chord; 'pentatonic': the pentatonic on the chord's root; 'blues'
+        and 'major_pentatonic': the blues scale and the major pentatonic of the tune's key, whatever the chord."""
+        root, kind, tones = self.harmony(now)
+        tonic = self.chart[1] % 12 if self.chart[1] is not None else root
+        if name == 'arpeggio':
+            steps, root = (), root
+        elif name == 'pentatonic' and kind not in ('dim', 'dim7', '+'):
+            steps = (0, 3, 5, 6, 10) if kind == 'm7b5' else FORCED['minor_pentatonic'] if kind.startswith('m') and \
+                kind != 'maj7' else FORCED['major_pentatonic']
+        elif name in ('blues', 'major_pentatonic'):
+            steps, root, tones = FORCED[name], tonic, ()
+        else:
+            return self.chord_scale(now)
+        scale = np.array([(pc - root) % 12 in steps for pc in range(12)], float)
+        scale[list(tones)] = 1
+        return scale
+
+    def bias(self, now, chord_tone, tension, out_of_key, palette=None):
         """For each of the 128 pitches, how much more a partner would play it now: the tones of your chord and its
-        tensions, less its avoid notes (a semitone over a chord tone: they clash with it whatever the key) and the
+        tensions (over a chart: within what a soloist playing `palette` plays, see palette()), less its avoid notes (a semitone over a chord tone: they clash with it whatever the key) and the
         pitches outside your key (a tension is not taken as one); in a forced scale, by FORCE at least, its tensions
         included."""
         in_key, harmony = self.in_key(), self.harmony(now)
@@ -227,7 +247,7 @@ class Listener:
             colours &= set(np.flatnonzero(in_key))
             out_of_key = max(out_of_key, FORCE)
         elif self.chart:   # the scale of the chord of the bar, and nothing else; a bass under it
-            in_key = self.chord_scale(now)
+            in_key = self.palette(now, palette)
             colours &= set(np.flatnonzero(in_key))
             bass = np.array([p < BASS_TOP for p in range(128)])
             root = np.array([p % 12 == harmony[0] for p in range(128)]) + 0.5 * np.array(
@@ -254,7 +274,7 @@ class Listener:
         """(tatum, phase) in seconds: your onsets fall on phase + k * tatum. None until your rhythm is regular; the
         eighths of a tempo you fix."""
         if self.tempo:
-            return self.tempo / 2, 0.0
+            return self.tempo / 2, self.origin % (self.tempo / 2)
         onsets = sorted({round(n[0], 2) for n in self.notes if n[0] > now - PULSE_S})
         if len(onsets) < 6:
             return None

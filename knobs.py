@@ -74,10 +74,10 @@ PRESETS = [
      {'space': 150, 'chord': 1, 'hands': 1, 'echo': 3.0, 'run': 30}),
     ('it comps', "it plays the harmony, low and steady with both hands, and keeps comping when you rest: you improvise",
      {'role': 0.0, 'dialogue': 0.0, 'density': 0.4, 'harmony': 0.4, 'groove': 1.0, 'risk': 0.3, 'key follow': 0.3},
-     {'chord': 4, 'solo_chord': 4, 'hands': 2, 'lowest': 2, 'highest': 4, 'timeout': 6000, 'busy': 8.0}),
+     {'chord': 4, 'solo_chord': 4, 'hands': 2, 'lowest': 2, 'highest': 4, 'timeout': 6000, 'busy': 8.0, 'part': 0}),
     ('it solos', "you play the harmony, it improvises a line over it, up high",
      {'role': 0.85, 'dialogue': 0.3, 'density': 0.8, 'harmony': 0.6, 'groove': 0.7, 'risk': 0.75, 'focus': 0.8},
-     {'chord': 1, 'solo_chord': 1, 'hands': 1, 'lowest': 5, 'highest': 7, 'busy': 8.0}),
+     {'chord': 1, 'solo_chord': 1, 'hands': 1, 'lowest': 5, 'highest': 7, 'busy': 8.0, 'part': 2}),
     ('free', "outside your key and off your pulse, surprising and dense: free improvisation together",
      {'harmony': 1.0, 'risk': 1.0, 'groove': 0.0, 'density': 0.75, 'focus': 0.8, 'key follow': 1.0}, {}),
     # the jam_bot's ways (music_transformer/jam.py): the model left free, started again from your last notes
@@ -103,7 +103,7 @@ MODES = {'listening': 'waiting for you to play', 'accompanying': 'accompanying y
          'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn', 'waiting': 'your turn'}
 
 # the sections of the tabs: the model's knobs on the AI mind tab and in Advanced, and each one's sound
-REGISTER = ('lowest', 'highest', 'root', 'scale', 'bpm', 'metronome', 'chart')
+REGISTER = ('lowest', 'highest', 'root', 'scale', 'bpm', 'metronome', 'chart', 'part')
 ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'answer', 'grid', 'phrase', 'breath', 'timeout',
                          'commit')),
             ('Harmony', ('out_of_key', 'chord_tone', 'tension', 'stay')),

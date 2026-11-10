@@ -6,6 +6,7 @@ iReal Pro (Cm7, C-7, F7b9, Bbmaj7, B^7, Am7b5, Aø, Gm6, C7/E...) and heard as t
 """
 import glob
 import os
+import random
 import re
 
 from music_transformer.listener import CHORDS
@@ -73,6 +74,22 @@ def bar_at(session, seconds):
     return CHARTS[session.chart - 1].at(max(seconds - session.began, 0) * session.pace / 60)
 
 
+PHRASE = 2 * BEATS   # beats a soloist keeps to one way of playing the changes: two bars
+WAYS = ('scale', 'scale', 'arpeggio', 'pentatonic', 'blues', 'blues')   # the ways, as often as each is here
+
+
+def beats(session, seconds):
+    """Beats of the session's chart played by session `seconds`."""
+    return max(seconds - session.began, 0) * session.pace / 60
+
+
+def way(session, seconds):
+    """How it solos at `seconds`, one of listener.palette()'s: another, by chance, every two bars. In a major key
+    the major pentatonic of the key is one more."""
+    ways = WAYS + (('major_pentatonic',) if (CHARTS[session.chart - 1].key or 0) < 12 else ())
+    return random.Random(session.varied + beats(session, seconds) // PHRASE).choice(ways)
+
+
 def follow(session, restart=True):
     """The session's chart or bpm knob was turned. With a chart it keeps to `pace`: the tempo you fix, or the
     chart's; the chart begins at `began`, the next bar from now, or, when only the tempo changed (`restart` False),
@@ -80,13 +97,14 @@ def follow(session, restart=True):
     now, before = session.clock() - session.started, getattr(session, 'pace', 0)
     beats = max(now - getattr(session, 'began', 0.0), 0) * before / 60   # played so far
     session.listener.chart, session.began, session.pace = None, 0.0, session.bpm
+    session.varied = getattr(session, 'varied', random.randrange(10 ** 6))   # its ways differ from one duo to the next
     if session.chart:
         tune = CHARTS[session.chart - 1]
         session.pace = session.bpm or tune.bpm
         bar = BEATS * 60 / session.pace
         session.began = now - beats * 60 / session.pace if before and not restart else -(-now // bar) * bar
         session.listener.chart = (lambda at: bar_at(session, at)[1][:2], tune.key)
-    session.listener.fix(session.pace)
+    session.listener.fix(session.pace, session.began)
 
 
 def reading(session, state):

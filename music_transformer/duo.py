@@ -17,6 +17,7 @@ from anticipation.vocab import AUTOREGRESS, DUR_OFFSET, NOTE_OFFSET, TIME_OFFSET
 from anticipation.sample import safe_logits, nucleus
 
 from music_transformer import chart
+from music_transformer.listener import BASS_TOP, CHART_FORCE
 from music_transformer.listener import FORCED, NAMES, STAY, Listener, hands
 from music_transformer.memory import Memory
 
@@ -74,6 +75,10 @@ ROOM = 12         # free keys a hand of its needs to keep apart at full strength
 SPLIT = 60        # your notes from middle C up are your right hand's
 MELODY = (72, 79) # where its line sings when you rest: the middle of your right hand, from C5 to G5
 PITCHES = torch.arange(MAX_PITCH, dtype=torch.float)
+# soloing over a tune (chart.py), as a jazz player does
+APPROACH = 1.5    # logit taken from a key a semitone from a chord tone, off the beat: a chromatic approach, now and then
+RESOLVE = 6.0     # logit added to the chord tone it approached: the next note lands on it
+TARGET = 1.5      # logit added to the chord's tones on the beat
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does
 KNOBS = {
@@ -121,6 +126,9 @@ KNOBS = {
     'bpm': (0, 0, 240, 'bpm', "the tempo it keeps to, its beats on the metronome's: yours as it hears it, or one you fix"),
     'metronome': (0, 0, 1, 'choice:off/on', "a click on each beat of the tempo you fix"),
     'chart': chart.KNOB(),
+    'part': (1, 0, 2, 'choice:comps/duet/solos', "over a tune: it comps on the chords' scales, it solos as a jazz player "
+             "does (scales, blues, pentatonics, arpeggios, chromatic approaches), or it comps while you play and solos "
+             "when you rest"),
     # the jam_bot's ways (jam.py): it starts again from your last notes when its strategy says, and plays on freely
     'strategy': (0, 0, 3, 'choice:duo/trade/gesture/request',
                  "the duo's own way, or the jam_bot's: taking turns, starting again after each of your gestures, or when you cue it"),
@@ -140,7 +148,7 @@ IN_EFFECT = {
     'alone': {'min_step', 'solo_chord', 'lead', 'answer', 'timeout'},   # you rest, and it has answered
 }
 ALWAYS = {'out_of_key', 'chord_tone', 'tension', 'stay', 'no_repeat', 'memory', 'max_rest', 'temperature', 'top_p',
-          'lowest', 'highest', 'hands', 'scale', 'bpm', 'chart', 'phrase', 'breath', 'recall', 'silence', 'sparse', 'strategy',
+          'lowest', 'highest', 'hands', 'scale', 'bpm', 'chart', 'part', 'phrase', 'breath', 'recall', 'silence', 'sparse', 'strategy',
           *RECALLED}
 
 
@@ -466,9 +474,13 @@ class DuoSession:
         in_key = self.listener.in_key()
         expected = self.mind.expect(at)[0] if self.recall and not self.chart else None   # the harmony it remembers comes next, not yours now
         chord_tone = max(self.chord_tone, chart.CHANGES) if self.chart else self.chord_tone
-        bias = torch.tensor(self.listener.bias(at, chord_tone, self.tension, self.out_of_key)[:MAX_PITCH]
+        solos = self.chart and right and (self.part == 2 or self.part == 1 and not you_play)
+        way = chart.way(self, at) if solos else None
+        bias = torch.tensor(self.listener.bias(at, chord_tone, self.tension, self.out_of_key, way)[:MAX_PITCH]
                             + (0 if expected is None else self.recall * np.tile(expected, 11)[:MAX_PITCH]),
                             dtype=torch.float) + self._register(tick, you_play, register, right)
+        if solos:
+            bias += self._approach(at, line, way)
         if not you_play and right and line and tick - self.heard_at < self.answer:
             phrase = self.listener.phrase(at)
             answered = sum(time_ > self.heard_at for time_, _ in line)
@@ -480,6 +492,27 @@ class DuoSession:
                 if 0 <= echo < MAX_PITCH:
                     bias[echo] += self.echo
         return bias.to(self.device)
+
+    def _approach(self, at, line, way):
+        """Logits added to its pitches when it solos over a tune, for the chromatic approach: off the beat, a key a
+        semitone from a tone of the chord may be played though it is outside the scale; the note after it is that
+        tone; and on the beat the chord's tones are its targets."""
+        bias = torch.zeros(MAX_PITCH)
+        tones, scale = self.listener.harmony(at)[2], self.listener.palette(at, way)
+        chord = torch.tensor([p % 12 in tones for p in range(MAX_PITCH)])
+        last = (line[-1][1] - NOTE_OFFSET) % MAX_PITCH if line else None
+        if last is not None and not scale[last % 12] and last % 12 not in tones:   # it approached: now it lands
+            for target in (last - 1, last + 1):
+                if 0 <= target < MAX_PITCH and target % 12 in tones:
+                    bias[target] += RESOLVE
+            return bias
+        if abs(chart.beats(self, at) % 1 - 0.5) < 0.35:   # off the beat
+            near = torch.roll(chord, 1) | torch.roll(chord, -1)
+            outside = torch.tensor([not scale[p % 12] and p % 12 not in tones for p in range(MAX_PITCH)])
+            bias[near & outside & (PITCHES >= BASS_TOP)] += CHART_FORCE - APPROACH
+        else:
+            bias[chord] += TARGET
+        return bias
 
     def _register(self, tick, you_play, register, right):
         """Logits added to its pitches for where it plays at `tick`, as a second pianist: while you play, -apart on
