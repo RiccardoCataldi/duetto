@@ -27,6 +27,18 @@ CHORDS = {'': (0, 4, 7), 'm': (0, 3, 7), '7': (0, 4, 7, 10), 'm7': (0, 3, 7, 10)
 TENSIONS = {'': (2, 6, 9), 'maj7': (2, 6, 9), '6': (2, 6), 'm': (2, 5), 'm7': (2, 5, 9), 'm6': (2, 5),
             'mMaj7': (2, 5, 9), '7': (2, 9), 'm7b5': (5, 8), 'dim': (2, 5, 8, 11), 'dim7': (2, 5, 8, 11),
             'sus4': (2, 9), '7sus4': (2, 9), '+': (2, 6)}
+# over a chart: the scales that go with each chord, from its root; the one nearest the tune's key is played
+CHORD_SCALES = {
+    'maj7': ('major', 'lydian'), '': ('major', 'lydian', 'mixolydian'), '6': ('major', 'lydian'),
+    '7': ('mixolydian', (0, 1, 4, 5, 7, 8, 10), (0, 1, 3, 4, 6, 8, 10)),   # or phrygian dominant, to a minor; altered
+    'sus4': ('mixolydian', 'major'), '7sus4': ('mixolydian',),
+    'm7': ('dorian', 'natural_minor', 'phrygian'), 'm': ('dorian', 'natural_minor', 'phrygian'),
+    'm6': ('melodic_minor', 'dorian'), 'mMaj7': ('melodic_minor', 'harmonic_minor'),
+    'm7b5': ('locrian', (0, 2, 3, 5, 6, 8, 10)), 'dim': ((0, 2, 3, 5, 6, 8, 9, 11),), 'dim7': ((0, 2, 3, 5, 6, 8, 9, 11),),
+    '+': ((0, 2, 4, 6, 8, 10),)}
+CHART_FORCE = 10.0   # logit taken from a pitch outside the chord's scale over a chart: it does not play it
+BASS_TOP = 52    # over a chart, under E3 it is a bass: the chord's root, its fifth and its other tones only
+ROOT = 3.0       # logit added to the root there, and half of it to the fifth
 AVOID = 3.0      # logit taken from a chord's avoid notes: a semitone over one of its tones (E over your C minor)
 BASS = 0.15      # how much the lowest sounding note says the chord's root is
 
@@ -192,6 +204,17 @@ class Listener:
         root, kind, tones = harmony
         return {(root + step) % 12 for step in TENSIONS[kind]} - tones
 
+    def chord_scale(self, now):
+        """Over a chart: for each pitch class, 1 if it is in the scale of the chord at `now`, the one of
+        CHORD_SCALES nearest the tune's key (D7 in G minor: with its b9 and b13), else 0."""
+        root, kind, tones = self.harmony(now)
+        key = MEMBER[self.chart[1]] if self.chart[1] is not None else np.zeros(12)
+        scales = [np.array([(pc - root) % 12 in (FORCED[s] if isinstance(s, str) else s) for pc in range(12)], float)
+                  for s in CHORD_SCALES[kind]]
+        scale = max(scales, key=lambda scale: scale @ key)   # the first of the nearest
+        scale[list(tones)] = 1
+        return scale
+
     def bias(self, now, chord_tone, tension, out_of_key):
         """For each of the 128 pitches, how much more a partner would play it now: the tones of your chord and its
         tensions, less its avoid notes (a semitone over a chord tone: they clash with it whatever the key) and the
@@ -203,6 +226,16 @@ class Listener:
         if self.forced:
             colours &= set(np.flatnonzero(in_key))
             out_of_key = max(out_of_key, FORCE)
+        elif self.chart:   # the scale of the chord of the bar, and nothing else; a bass under it
+            in_key = self.chord_scale(now)
+            colours &= set(np.flatnonzero(in_key))
+            bass = np.array([p < BASS_TOP for p in range(128)])
+            root = np.array([p % 12 == harmony[0] for p in range(128)]) + 0.5 * np.array(
+                [p % 12 == (harmony[0] + 7) % 12 and p % 12 in chord for p in range(128)])
+            low = bass * (ROOT * root - CHART_FORCE * np.array([p % 12 not in chord for p in range(128)]))
+            avoid = {(tone + 1) % 12 for tone in chord} - chord - colours
+            return low + np.array([chord_tone * (p % 12 in chord) + tension * (p % 12 in colours)
+                                   - AVOID * (p % 12 in avoid) - CHART_FORCE * (1 - in_key[p % 12]) for p in range(128)])
         avoid = {(tone + 1) % 12 for tone in chord} - chord - colours
         free = colours if self.forced else colours | chord   # the chord you play is never out of your key
         return np.array([chord_tone * (p % 12 in chord) + tension * (p % 12 in colours) - AVOID * (p % 12 in avoid)

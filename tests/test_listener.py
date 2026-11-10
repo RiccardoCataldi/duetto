@@ -2,6 +2,8 @@ import os
 import sys
 import unittest
 
+import numpy as np
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from music_transformer.listener import Listener
 
@@ -134,6 +136,29 @@ class ListenerTest(unittest.TestCase):
         listener.fix(0)
         self.assertAlmostEqual(listener.pulse(end)[0], 0.3)
         self.assertAlmostEqual(listener.beat(0.3), 0.6)
+
+
+class ChartTest(unittest.TestCase):
+    def over(self, root, kind, key):
+        listener = Listener()
+        listener.chart = (lambda now: (root, kind), key)
+        return listener, listener.bias(0.0, 1.0, 1.0, 2.0)
+
+    def test_over_a_chart_it_keeps_to_the_scale_of_the_chord(self):
+        listener, bias = self.over(0, 'm7', 10)       # Cm7 in Bb major: C dorian
+        self.assertEqual(sorted(np.flatnonzero(listener.chord_scale(0.0))), [0, 2, 3, 5, 7, 9, 10])
+        for out in (61, 64, 66, 68, 71):              # Db E F# Ab B: none of B major's own notes gets in
+            self.assertLess(bias[out], -9)
+        self.assertGreater(min(bias[p] for p in (60, 62, 63, 65, 67, 69, 70)), -1)
+        listener, _ = self.over(2, '7', 19)           # D7 in G minor: with its b9 and b13
+        self.assertEqual(sorted(np.flatnonzero(listener.chord_scale(0.0))), [0, 2, 3, 6, 7, 9, 10])
+
+    def test_over_a_chart_its_bass_plays_the_chord_and_its_root_most_of_all(self):
+        _, bias = self.over(0, 'm7', 10)
+        self.assertEqual(int(np.argmax(bias[36:48])) + 36, 36)        # C2
+        self.assertLess(bias[38], -8)                 # D2 is in the scale, but no bass note of Cm7
+        self.assertGreater(bias[43], bias[39])        # its fifth over its third
+        self.assertGreater(bias[62], -1)              # up there D is a note of the line
 
 
 class AvoidTest(unittest.TestCase):

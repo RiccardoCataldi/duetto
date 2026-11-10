@@ -435,7 +435,7 @@ class AriaSessionTest(unittest.TestCase):
         self.session.hear(10.2, 0.3, 62, 80)
         bias = self.session._partner(self.session.now() + 30)
         self.assertGreater(bias[66], bias[65] + 3)   # F# over F
-        self.assertLess(bias[67], bias[65])          # G, a semitone over its third: an avoid note
+        self.assertLess(bias[65], -5)                # F is not in D7's scale here: it is not played
         self.session.turn(bpm=60)                    # half the tempo: the same bar, twice as long
         state = self.session.state()
         self.assertEqual((state['bpm'], state['chart']['bar'], state['chart']['bars'][5]), (60, 5, ['D7']))
