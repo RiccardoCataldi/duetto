@@ -243,6 +243,17 @@ class DuoSessionTest(unittest.TestCase):
         self.session.play()
         self.assertGreaterEqual(self.session.ahead(), duo.LOOKAHEAD)
 
+    def test_over_a_chart_it_plays_the_chord_of_the_bar_at_the_charts_tempo(self):
+        from music_transformer.chart import CHARTS
+        tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'autumn_leaves')
+        self.session.turn(chart=tune + 1)
+        self.assertEqual((self.session.bpm, self.session.state()['chord']), (120, 'Cm7 → F7'))
+        self.clock.t = 10.2                          # bar 6 of 2 s each: D7, whose F# is not in G minor
+        self.session.hear(10.2, 0.3, 62)
+        self.assertEqual(self.session.state()['key'], 'Autumn Leaves 6/32')
+        bias = self.session._partner(self.session.now() + 30, [], (0, 127), True)
+        self.assertGreater(bias[66], bias[65] + 1)
+
     def test_when_you_let_go_it_hears_how_long_your_note_really_was(self):
         self.session.hear(0.0, 0.3, 60)
         list(self.fill())

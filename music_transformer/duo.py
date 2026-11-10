@@ -16,6 +16,7 @@ from anticipation.config import CONTEXT_SIZE, MAX_DUR, MAX_PITCH, MAX_TIME, TIME
 from anticipation.vocab import AUTOREGRESS, DUR_OFFSET, NOTE_OFFSET, TIME_OFFSET
 from anticipation.sample import safe_logits, nucleus
 
+from music_transformer import chart
 from music_transformer.listener import FORCED, NAMES, STAY, Listener, hands
 from music_transformer.memory import Memory
 
@@ -119,6 +120,7 @@ KNOBS = {
               "the scale it keeps to: your key as it hears it, or one you force it into"),
     'bpm': (0, 0, 240, 'bpm', "the tempo it keeps to, its beats on the metronome's: yours as it hears it, or one you fix"),
     'metronome': (0, 0, 1, 'choice:off/on', "a click on each beat of the tempo you fix"),
+    'chart': chart.KNOB(),
     # the jam_bot's ways (jam.py): it starts again from your last notes when its strategy says, and plays on freely
     'strategy': (0, 0, 3, 'choice:duo/trade/gesture/request',
                  "the duo's own way, or the jam_bot's: taking turns, starting again after each of your gestures, or when you cue it"),
@@ -138,7 +140,7 @@ IN_EFFECT = {
     'alone': {'min_step', 'solo_chord', 'lead', 'answer', 'timeout'},   # you rest, and it has answered
 }
 ALWAYS = {'out_of_key', 'chord_tone', 'tension', 'stay', 'no_repeat', 'memory', 'max_rest', 'temperature', 'top_p',
-          'lowest', 'highest', 'hands', 'scale', 'bpm', 'phrase', 'breath', 'recall', 'silence', 'sparse', 'strategy',
+          'lowest', 'highest', 'hands', 'scale', 'bpm', 'chart', 'phrase', 'breath', 'recall', 'silence', 'sparse', 'strategy',
           *RECALLED}
 
 
@@ -157,10 +159,10 @@ class DuoSession:
         self.mind.load(corpus)
         for name, (default, *_) in KNOBS.items():
             setattr(self, name, default)
+        self.clock, self.started = clock, clock() if started is None else started
         self.turn(**{name: getattr(self, name) for name in RECALLED})
         self.turn(**knobs)
         self.heard_at = None           # context time of your last note
-        self.clock, self.started = clock, clock() if started is None else started
         self.base = None               # session tick of time 0 in the context: your first note
         self.seq = [AUTOREGRESS]       # complete events in time order, yours and the model's
         self.past, self.fed = None, 0  # the KV cache covers seq[:fed]
@@ -183,12 +185,14 @@ class DuoSession:
             self.listener.force(self.root, list(FORCED)[self.scale - 1] if self.scale else None)
         if 'bpm' in knobs:
             self.listener.fix(self.bpm)
+        if 'chart' in knobs:
+            chart.follow(self)
 
     def state(self):
         """What it hears and what it is doing: {'mode', 'key', 'chord', 'bpm', 'active': the knobs in effect}."""
         if self.base is None or self.heard_at is None:
-            return {'mode': 'listening', 'key': self.listener.forced_name(), 'chord': None, 'bpm': self.bpm or None,
-                    'active': sorted(ALWAYS)}
+            return chart.reading(self, {'mode': 'listening', 'key': self.listener.forced_name(), 'chord': None,
+                                        'bpm': self.bpm or None, 'active': sorted(ALWAYS)})
         now = self.now()
         at = self._seconds(now)
         if now - self.heard_at < PLAYING:
@@ -206,9 +210,10 @@ class DuoSession:
         active = active - {'stay'} | {'root'} if self.scale else active   # forced: your key no longer counts
         active |= {'metronome'} if self.bpm else set()
         heard = self.listener.name(key) if key is not None else None
-        return {'mode': mode, 'key': self.listener.forced_name() or heard,
-                'chord': self.listener.chord_label(at) if chord else None,
-                'bpm': round(60 / self.listener.beat(pulse[0])) if pulse else None, 'active': sorted(active)}
+        return chart.reading(self, {
+            'mode': mode, 'key': self.listener.forced_name() or heard,
+            'chord': self.listener.chord_label(at) if chord else None,
+            'bpm': round(60 / self.listener.beat(pulse[0])) if pulse else None, 'active': sorted(active)})
 
     def octaves(self):
         """The lowest and highest pitch it may play, from C of its lowest octave to B of its highest (C4 = 60)."""
@@ -459,7 +464,8 @@ class DuoSession:
         at, you_play = self._seconds(tick), tick - self.heard_at < PLAYING
         in_key = self.listener.in_key()
         expected = self.mind.expect(at)[0] if self.recall else None   # the harmony it remembers comes next, not yours now
-        bias = torch.tensor(self.listener.bias(at, self.chord_tone, self.tension, self.out_of_key)[:MAX_PITCH]
+        chord_tone = max(self.chord_tone, chart.CHANGES) if self.chart else self.chord_tone
+        bias = torch.tensor(self.listener.bias(at, chord_tone, self.tension, self.out_of_key)[:MAX_PITCH]
                             + (0 if expected is None else self.recall * np.tile(expected, 11)[:MAX_PITCH]),
                             dtype=torch.float) + self._register(tick, you_play, register, right)
         if not you_play and right and line and tick - self.heard_at < self.answer:

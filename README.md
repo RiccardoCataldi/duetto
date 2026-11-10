@@ -79,7 +79,7 @@ Knobs and sound are kept in `~/.config/ai-duet/`.
 
 ## Play a tune from a chart
 
-With Aria, the `chart` control (AI mind tab, under Range, key & tempo) picks a tune, as from a Real Book: the model plays over its chords bar by bar, round and round, at the chart's tempo with the metronome on (turn `bpm` for another tempo). The top of the piano roll shows the tune and the bar, the chord of the bar and the next one. The chart begins at the next bar after you pick it; the model joins at your first note. Pick a playing style for its part: **it comps** (you improvise), **it solos** (you comp), **duet**.
+The `chart` control (AI mind tab, under Range, key & tempo) picks a tune, as from a Real Book: the model plays over its chords bar by bar, round and round, at the chart's tempo with the metronome on (turn `bpm` for another tempo). The top of the piano roll shows the tune and the bar, the chord of the bar and the next one. The chart begins at the next bar after you pick it; the model joins at your first note. Pick a playing style for its part: **it comps** (you improvise), **it solos** (you comp), **duet**.
 
 Charts are text files in [music_transformer/charts/](music_transformer/charts/): Autumn Leaves, Ornithology and a blues in F are there. To add one, write its bars between `|` (`%` repeats the bar before, two chords share a bar), with its title, key and tempo on top, and start the server again:
 

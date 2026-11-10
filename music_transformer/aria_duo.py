@@ -23,7 +23,7 @@ import time
 import torch
 from ariautils.tokenizer import AbsTokenizer
 
-from music_transformer.chart import BEATS, CHARTS
+from music_transformer import chart
 from music_transformer.listener import FORCED, NAMES, STAY, Listener, hands
 
 NAME = 'aria'
@@ -56,7 +56,6 @@ NEVER = 6000      # a timeout this long: it plays on for good
 UNDER = 0.85      # how loud it plays while you play, against you: it accompanies
 LOUDER = 30       # steps of velocity away from yours that cost it one `follow`
 HEARD = 400       # ticks of your playing, up to your last note, that say how loud you play
-CHANGES = 1.5     # over a chart it leans on the chord of the bar this much at least: it plays the changes
 RECENTLY = 16     # notes of its own it looks back on, not to play the same keys over and over
 BALANCE = 800     # ticks over which it plays about as much as you did, up to your last note
 
@@ -94,8 +93,7 @@ KNOBS = {
               "the scale it keeps to: your key as it hears it, or one you force it into"),
     'bpm': (0, 0, 240, 'bpm', "the tempo its grid keeps to: yours as it hears it, or one you fix"),
     'metronome': (0, 0, 1, 'choice:off/on', "a click on each beat of the tempo you fix"),
-    'chart': (0, 0, len(CHARTS), 'choice:' + '/'.join(['off', *(chart.name for chart in CHARTS)]),
-              "a tune it plays over with you, bar by bar from the next bar on, at its tempo with a metronome (charts/)"),
+    'chart': chart.KNOB(),
 }
 IN_EFFECT = {'listening': set(), 'accompanying': {'space', 'apart', 'chord', 'commit'}, 'waiting': set(),
              'answering': {'min_step', 'solo_chord', 'lead', 'answer', 'echo', 'timeout'},
@@ -146,7 +144,6 @@ class AriaSession:
         for name, (default, *_) in KNOBS.items():
             setattr(self, name, default)
         self.clock, self.started = clock, clock() if started is None else started
-        self.began = 0.0               # session seconds at which the chart began: the first beat of a bar
         self.turn(**knobs)
         self.heard_at = None           # tick of your last note
         self.base = None               # session tick of tick 0: your first note
@@ -164,30 +161,10 @@ class AriaSession:
             self.listener.stay(self.stay)
         if 'root' in knobs or 'scale' in knobs:
             self.listener.force(self.root, list(FORCED)[self.scale - 1] if self.scale else None)
-        if 'chart' in knobs:
-            self.listener.chart = None
-            if self.chart:   # at its tempo unless you fixed one, clicked; from the next bar of the metronome on
-                tune = CHARTS[self.chart - 1]
-                self.bpm, self.metronome = self.bpm or tune.bpm, 1
-                bar = BEATS * 60 / self.bpm
-                self.began = -(-(self.clock() - self.started) // bar) * bar
-                self.listener.chart = (lambda now: self._bar(now)[1][:2], tune.key)
-        if 'bpm' in knobs or 'chart' in knobs:
+        if 'bpm' in knobs:
             self.listener.fix(self.bpm)
-
-    def _bar(self, seconds):
-        """(bar from 0, (root, kind, name)) of the chart at session `seconds`."""
-        return CHARTS[self.chart - 1].at(max(seconds - self.began, 0) * self.bpm / 60)
-
-    def _reading(self, state):
-        """`state` with the chart in the place of your key and chord: its title and bar, its chord and the next."""
-        if self.chart:
-            tune, now = CHARTS[self.chart - 1], self.clock() - self.started
-            bar, here = self._bar(now)
-            state['key'] = f"{tune.title} {bar + 1}/{len(tune.bars)}"
-            state['chord'] = f"{here[2]} → {self._bar(now + BEATS * 60 / self.bpm)[1][2]}"
-            state['bpm'] = self.bpm
-        return state
+        if 'chart' in knobs:
+            chart.follow(self)
 
     def recut(self):
         """Its notes already sent are dropped only when you play (hear() says from when): never after play()."""
@@ -199,7 +176,7 @@ class AriaSession:
     def state(self):
         """What it hears and what it is doing: {'mode', 'key', 'chord', 'bpm', 'active': the knobs in effect}."""
         if self.base is None or self.heard_at is None:
-            return self._reading({'mode': 'listening', 'key': self.listener.forced_name(), 'chord': None,
+            return chart.reading(self, {'mode': 'listening', 'key': self.listener.forced_name(), 'chord': None,
                                   'bpm': self.bpm or None, 'active': sorted(ALWAYS)})
         now = self.now()
         at = self._seconds(now)
@@ -216,7 +193,7 @@ class AriaSession:
         active = ALWAYS | IN_EFFECT[mode] | ({'grid'} if pulse else set())
         active = active - {'stay'} | {'root'} if self.scale else active   # forced: your key no longer counts
         active |= {'metronome'} if self.bpm else set()
-        return self._reading({
+        return chart.reading(self, {
             'mode': mode, 'key': self.listener.forced_name() or (self.listener.name(key) if key is not None else None),
             'chord': self.listener.chord_label(at),
             'bpm': round(60 / self.listener.beat(pulse[0])) if pulse else None, 'active': sorted(active)})
@@ -373,7 +350,7 @@ class AriaSession:
         if self.heard_at is None:
             return torch.zeros(128)
         at = self._seconds(tick)
-        chord_tone = max(self.chord_tone, CHANGES) if self.chart else self.chord_tone
+        chord_tone = max(self.chord_tone, chart.CHANGES) if self.chart else self.chord_tone
         bias = torch.tensor(self.listener.bias(at, chord_tone, self.tension, self.out_of_key), dtype=torch.float)
         if PLAYING <= tick - self.heard_at < self.answer:
             phrase = self.listener.phrase(at)

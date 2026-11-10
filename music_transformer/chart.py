@@ -62,4 +62,39 @@ class Chart:
         return bar, chords[int(beats % BEATS / BEATS * len(chords))]
 
 
+CHANGES = 1.5   # over a chart it leans on the chord of the bar this much at least: it plays the changes
+# the knob of a session that follows charts: its `chart`, `bpm`, `metronome`, `clock`, `started` and `listener`
+KNOB = lambda: (0, 0, len(CHARTS), 'choice:' + '/'.join(['off', *(chart.name for chart in CHARTS)]),
+                "a tune it plays over with you, bar by bar from the next bar on, at its tempo with a metronome (charts/)")
+
+
+def bar_at(session, seconds):
+    """(bar from 0, (root, kind, name)) of the session's chart at session `seconds`."""
+    return CHARTS[session.chart - 1].at(max(seconds - session.began, 0) * session.bpm / 60)
+
+
+def follow(session):
+    """The session's chart knob was turned: it follows the chart at its tempo unless you fixed one, clicked, from
+    the next bar of the metronome on; or your chord and key again."""
+    session.listener.chart, session.began = None, 0.0
+    if session.chart:
+        tune = CHARTS[session.chart - 1]
+        session.bpm, session.metronome = session.bpm or tune.bpm, 1
+        bar = BEATS * 60 / session.bpm
+        session.began = -(-(session.clock() - session.started) // bar) * bar
+        session.listener.chart = (lambda now: bar_at(session, now)[1][:2], tune.key)
+    session.listener.fix(session.bpm)
+
+
+def reading(session, state):
+    """`state` with the chart in the place of your key and chord: its title and bar, its chord and the next."""
+    if session.chart:
+        tune, now = CHARTS[session.chart - 1], session.clock() - session.started
+        bar, here = bar_at(session, now)
+        state['key'] = f"{tune.title} {bar + 1}/{len(tune.bars)}"
+        state['chord'] = f"{here[2]} → {bar_at(session, now + BEATS * 60 / session.bpm)[1][2]}"
+        state['bpm'] = session.bpm
+    return state
+
+
 CHARTS = [Chart(path) for path in sorted(glob.glob(os.path.join(os.path.dirname(__file__), 'charts', '*.txt')))]
