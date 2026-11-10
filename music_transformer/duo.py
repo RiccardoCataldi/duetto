@@ -16,7 +16,7 @@ from anticipation.config import CONTEXT_SIZE, MAX_DUR, MAX_PITCH, MAX_TIME, TIME
 from anticipation.vocab import AUTOREGRESS, DUR_OFFSET, NOTE_OFFSET, TIME_OFFSET
 from anticipation.sample import safe_logits, nucleus
 
-from music_transformer import bebop, chart
+from music_transformer import bebop, chart, licks
 from music_transformer.listener import BASS_TOP, CHART_FORCE, ROOT
 from music_transformer.listener import FORCED, NAMES, STAY, Listener, hands
 from music_transformer.memory import Memory
@@ -84,6 +84,7 @@ LINE = 1.5        # and how its line moves from one note to the next
 SOLO = (60, 96)   # over a tune, where its line is when it solos: from middle C to C7
 COMP = (53, 76)   # where its chords are when it comps: from F3 to E5
 BASS = (28, BASS_TOP - 1)   # and its walking bass: from E1
+LATE = 6          # ticks: a note of a phrase it quotes may be this late and still be played
 WALK = 4.0        # logit added to the root where its walking bass begins a bar or a chord
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does
@@ -185,6 +186,8 @@ class DuoSession:
                                        # note may wait for your pulse: it has just jumped
         self.cursor = 0.0              # session seconds of its next slice: a rest in its memory passes here
         self.free, self.owed = True, False   # it invents, its memory silent; your note is still to be answered
+        self.quote, self.quoted = [], None   # (seconds, pitch, duration) of the phrase it quotes; the two bars it is for
+        self.quoting = None                  # (whose it is, the seconds it ends at)
 
     def turn(self, **knobs):
         """Sets knobs (see KNOBS), kept within their range; they take effect from the model's next note."""
@@ -345,6 +348,9 @@ class DuoSession:
         solos = self._solos(self._seconds(earliest), you_play)
         feel = chart.feel(self, self._seconds(earliest)) if solos else None
         unit = round(60 / self.pace / feel * TIME_RESOLUTION) if feel else None   # ticks
+        quote = self._lick(earliest) if solos else None   # the next note of a phrase it quotes, as it was played
+        if quote:
+            feel = unit = None
         if feel and feel > 2:
             latest = min(latest, max(earliest, after + 2 * unit))
         # when each hand may play next: (instrument, its line, its register, its onsets as a mask over times)
@@ -353,6 +359,10 @@ class DuoSession:
             if unit and instrument == self.me:
                 step = max(min(step, unit - self.grid), 5)   # its line may be as fast as that
             line, window = self._my_line(instrument), torch.full((MAX_TIME,), -float('inf'))
+            if quote and instrument == self.me:   # then and nowhere else
+                window[quote[0]] = 0
+                hands.append((instrument, line, register, window))
+                continue
             start, end = max(earliest, breath) if walks and instrument == self.me else earliest, latest
             end = max(end, start)
             if line:
@@ -374,7 +384,8 @@ class DuoSession:
             due = round(origin + k * beat)
             if due + self.grid + 1 < MAX_TIME:
                 left[3][:] = -float('inf')   # on the beat, and only there
-                left[3][max(due, earliest):due + self.grid + 1] = 0   # not early: it hears the chord of the beat
+                if not quote or quote[0] >= due:   # a note it quotes before the beat comes first
+                    left[3][max(due, earliest):due + self.grid + 1] = 0   # not early: it hears the chord of the beat
                 for *_, window in hands:
                     window[due + self.grid + 1:] = -float('inf')
             else:
@@ -386,7 +397,9 @@ class DuoSession:
                 times = torch.stack([window for *_, window in hands]).max(0).values.to(mask.device)
                 mask[TIME_OFFSET:TIME_OFFSET + MAX_TIME] = times
                 mask = self._on_your_pulse(mask, earliest, int(torch.nonzero(torch.isfinite(times)).max()), you_play,
-                                           feel)
+                                           0 if quote else feel)
+            elif slot == 1 and quote and self.seq[-1] - TIME_OFFSET == quote[0]:   # about as long as it was played
+                mask[DUR_OFFSET + max(quote[2] // 2, 1):DUR_OFFSET + min(2 * quote[2], MAX_DUR - 1) + 1] = 0
             elif slot == 1:
                 mask[DUR_OFFSET:DUR_OFFSET + MAX_DUR] = 0
             else:
@@ -400,6 +413,9 @@ class DuoSession:
                     if not torch.isfinite(window[tick]) or (owed and instrument != self.left):
                         continue   # this hand may not play now
                     first = NOTE_OFFSET + instrument * MAX_PITCH
+                    if quote and instrument == self.me:   # the note as it was played
+                        mask[first + quote[1]] = 0
+                        continue
                     mask[first + low:first + high + 1] = 0
                     for note in self._banned(line, tick):
                         mask[note] = -float('inf')
@@ -561,6 +577,7 @@ class DuoSession:
         chord_tone = max(self.chord_tone, chart.CHANGES) if self.chart else self.chord_tone
         solos = right and self._solos(at, you_play)
         way = chart.way(self, at) if solos else None
+        way = 'bebop' if way == 'quote' else way   # between the phrases it quotes it plays as they do
         if way == 'bebop':
             chord_tone = 0   # what it plays over the chord comes from the soloists' habits instead (_bebop)
         bias = torch.tensor(self.listener.bias(at, chord_tone, 0 if way == 'bebop' else self.tension, self.out_of_key,
@@ -585,6 +602,35 @@ class DuoSession:
                 if 0 <= echo < MAX_PITCH:
                     bias[echo] += self.echo
         return bias.to(self.device)
+
+    def _lick(self, earliest):
+        """The next note of the phrase it quotes, (tick, pitch, ticks it lasts), or None. Every two bars in which
+        its way is to quote (chart.way), it takes a phrase a great soloist played over these same chords (licks.py)
+        and plays it as it was played, in the key of the tune, swung as the tune is; what you make it sample again
+        it plays again."""
+        beat, at = 60 / self.pace, self._seconds(earliest)
+        phrase = int((chart.beats(self, at) + 0.5) // chart.PHRASE)
+        start = self.began + phrase * chart.PHRASE * beat
+        if self.quoted != phrase:
+            self.quoted, self.quote = phrase, []
+            low, high = self._hands(False, True)[0][3]
+            line = self._my_line()
+            near = (line[-1][1] - NOTE_OFFSET) % MAX_PITCH if line else (low + high) // 2
+            found = chart.way(self, start + 0.01) == 'quote' and licks.quote(
+                random.Random(self.varied * 7 + phrase), [chart.bar_at(self, start + (k + 0.01) * beat)[1][:2]
+                                                          for k in range(chart.PHRASE)], low, high, near)
+            if found:
+                swing = chart.CHARTS[self.chart - 1].swing   # an eighth off the beat falls on its last third
+                self.quote = [(start + (at_ + (1 / 6 if swing and abs(at_ % 1 - 0.5) < 0.04 else 0)) * beat, pitch,
+                               max(round(lasts * beat * TIME_RESOLUTION), 1)) for at_, lasts, pitch in found[1]]
+                self.quoting = (found[0], self.quote[-1][0])
+        line = self._my_line()
+        played = line[-1][0] if line else -1
+        for seconds, pitch, lasts in self.quote:
+            tick = self._tick(seconds)
+            if tick > played and tick >= earliest - LATE and tick < MAX_TIME:
+                return max(tick, earliest), pitch, lasts
+        return None
 
     def _walk(self, at, line):
         """Logits added to its left hand's pitches over a tune, a walking bass: the root when the bar or the chord

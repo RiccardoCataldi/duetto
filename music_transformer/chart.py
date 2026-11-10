@@ -80,7 +80,8 @@ def bar_at(session, seconds):
 
 
 PHRASE = 2 * BEATS   # beats a soloist keeps to one way of playing the changes: two bars
-WAYS = ('bebop',) * 6 + ('scale', 'arpeggio', 'pentatonic', 'blues')   # the ways, as often as each is here
+# the ways, as often as each is here; 'quote': a phrase of a great soloist's over these chords (licks.py)
+WAYS = ('quote',) * 5 + ('bebop',) * 4 + ('scale', 'arpeggio', 'pentatonic', 'blues')
 
 
 def beats(session, seconds):
@@ -131,6 +132,9 @@ def reading(session, state):
         state['bpm'] = session.pace
         state['chart'] = {'title': tune.title, 'bars': [[name for *_, name in chords] for chords in tune.bars],
                           'bar': bar, 'beat': int(max(now - session.began, 0) * session.pace / 60 % BEATS)}
+        quoting = getattr(session, 'quoting', None)
+        if quoting and now < quoting[1]:   # whose phrase it is playing
+            state['chart']['quote'] = quoting[0]
         if now < session.began:   # the count-in: no bar yet, and the beats still to go
             left = int((session.began - now) * session.pace / 60) + 1
             state['key'], state['chart']['bar'], state['chart']['count'] = f"{tune.title} in {left}", -1, left

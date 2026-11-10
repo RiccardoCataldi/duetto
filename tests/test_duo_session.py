@@ -1,5 +1,6 @@
 """Needs torch and anticipation: run it where the model runs (python -m unittest tests.test_duo_session)."""
 import os
+import random
 import sys
 import unittest
 import unittest.mock
@@ -133,6 +134,26 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual([hand[2] for hand in self.session._hands(False, self.session._solos(1.0, False))], [1, 1])
         self.session.turn(lowest=5, highest=6)       # its octaves still hold: C5 to B6, and no room for a bass there
         self.assertEqual([hand[3] for hand in self.session._hands(False, True)], [(72, 95)])
+
+    def test_soloing_it_quotes_a_phrase_played_over_the_same_chords_in_the_key_of_the_tune(self):
+        from music_transformer import licks
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=2)
+        with unittest.mock.patch('music_transformer.chart.way', return_value='quote'):
+            session.begin()
+            notes = []
+            for _ in range(45):                          # the first two bars: Cm7 | F7, 4 s
+                self.clock.t += 0.1
+                while session.ahead() < duo.LOOKAHEAD:
+                    notes.append(session.play())
+            self.assertIn(' · ', session.state()['chart'].get('quote', ''))
+        played = [(onset * 2, pitch) for onset, _, pitch, _ in notes if onset < 4.0]   # (beat, pitch)
+        ours = lambda lick: [(at + (1 / 6 if abs(at % 1 - 0.5) < 0.04 else 0), pitch) for at, _, pitch in lick]
+        fits = [lick for _, lick in licks.DATA['licks']['min.0.4 dom.5.4'] if all(
+            any(abs(at - beat) < 0.15 and (pitch - key) % 12 == 0 for at, key in ours(lick)) for beat, pitch in played)]
+        self.assertGreaterEqual(len(fits), 1)            # note for note, on C: the ii-V of some soloist (it came
+                                                         # in after its first notes: the duo had just begun)
+        self.assertGreater(len(played), 3)
+        self.assertEqual(licks.quote(random.Random(0), [(0, 'dim7')] * 3 + [(1, 'm7')] * 5, 60, 96, 72), None)
 
     def test_over_a_tune_its_eighths_are_swung(self):
         session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=self.tune('autumn_leaves'), part=0, hands=1,
@@ -373,7 +394,8 @@ class DuoSessionTest(unittest.TestCase):
         for division, step in ((3, 1 / 6), (4, 0.125)):
             session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=tune + 1, part=2, hands=1, breath=0)
             session.hear(0.0, 0.3, 60)
-            with unittest.mock.patch('music_transformer.chart.feel', return_value=division):
+            with unittest.mock.patch('music_transformer.chart.feel', return_value=division), \
+                    unittest.mock.patch('music_transformer.chart.way', return_value='bebop'):
                 onsets = sorted({session.play()[0] for _ in range(30)})
             self.assertTrue(all(min(o % step, step - o % step) <= 0.035 for o in onsets), onsets)   # on its grid
             gaps = [b - a for a, b in zip(onsets, onsets[1:])]

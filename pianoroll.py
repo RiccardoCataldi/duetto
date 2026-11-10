@@ -233,6 +233,9 @@ class Roll:
                 room = cell_w / len(names)
                 theme.text(screen, theme.fit(name, 15, room - 8, i == now), 15, colour,
                            (round(cell.x + room * (k + 0.5)), cell.centery - 3), bold=i == now, anchor='center')
+        if self.chart.get('quote'):   # whose phrase it is playing
+            theme.text(screen, theme.fit(f"quoting {self.chart['quote']}", 13, cell_w * across), 13, AI,
+                       (self.size[0] // 2, top + rows * cell_h + 22), anchor='center')
         end = left + (len(bars) - 1) % across * cell_w + cell_w
         y = top + (rows - 1) * cell_h
         for x in (end - 4, end - 1):
