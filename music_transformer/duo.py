@@ -345,7 +345,8 @@ class DuoSession:
         """What its memory says comes next: its next slice into the plan, or a rest; `free` when it says nothing.
         It turns to its memory at a share of its steps as large as recall is of EXACT, and invents at the others."""
         self.free = True
-        if not self.recall or (not self.sparse and random.random() >= self.recall / EXACT):
+        # over a tune it plays the changes, not what it remembers of you, which was over other chords
+        if not self.recall or self.chart or (not self.sparse and random.random() >= self.recall / EXACT):
             return
         self.mind.update(self._seconds(now))
         at = self._seconds(max(now + MARGIN, last, self._tick(self.cursor)))
@@ -414,7 +415,7 @@ class DuoSession:
 
     def _timed_out(self, tick):
         """Whether it has played on long enough, by `tick`, after your last note."""
-        return self.timeout < NEVER and tick - self.heard_at >= self.timeout
+        return not self.chart and self.timeout < NEVER and tick - self.heard_at >= self.timeout   # a tune goes on
 
     def _breath(self):
         """The tick before which it keeps silent: a breath after its last note, once its phrase has run out of notes.
@@ -432,7 +433,9 @@ class DuoSession:
     def _hands(self, you_play):
         """(instrument, step, most notes at once, (lowest, highest) pitch) of each hand it plays with."""
         low, high = self.octaves()
-        right = (self.me, self.space if you_play else self.min_step, self.chord if you_play else self.solo_chord)
+        # over a tune both of you play on: it does not thin out to leave you room
+        right = (self.me, self.space if you_play and not self.chart else self.min_step,
+                 self.chord if you_play else self.solo_chord)
         if self.hands == 1:
             return [(*right, (low, high))]
         hands = [(*right, (max(low, RIGHT_BOTTOM), high)), (self.left, self.left_step, LEFT_CHORD, (low, min(high, LEFT_TOP)))]
@@ -447,7 +450,7 @@ class DuoSession:
         pulse = self.listener.pulse(self._seconds(self.now()))
         if pulse is None:
             return mask
-        unit = self.listener.beat(pulse[0]) if you_play else pulse[0]
+        unit = self.listener.beat(pulse[0]) if you_play and not self.chart else pulse[0]   # a tune swings in eighths
         first = math.ceil((self._seconds(earliest) - pulse[1]) / unit - self.grid / (unit * TIME_RESOLUTION))
         grid = torch.full_like(mask, -float('inf'))
         for k in range(first, first + math.ceil((latest - earliest) / (unit * TIME_RESOLUTION)) + 2):
@@ -461,7 +464,7 @@ class DuoSession:
         hand): your chord and key; where it plays against you (_register); after your phrase, its answer."""
         at, you_play = self._seconds(tick), tick - self.heard_at < PLAYING
         in_key = self.listener.in_key()
-        expected = self.mind.expect(at)[0] if self.recall else None   # the harmony it remembers comes next, not yours now
+        expected = self.mind.expect(at)[0] if self.recall and not self.chart else None   # the harmony it remembers comes next, not yours now
         chord_tone = max(self.chord_tone, chart.CHANGES) if self.chart else self.chord_tone
         bias = torch.tensor(self.listener.bias(at, chord_tone, self.tension, self.out_of_key)[:MAX_PITCH]
                             + (0 if expected is None else self.recall * np.tile(expected, 11)[:MAX_PITCH]),
