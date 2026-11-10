@@ -191,6 +191,9 @@ class DuoSessionTest(unittest.TestCase):
         self.session.turn(part=2)
         solos = self.session._hands(False, self.session._solos(1.0, False))
         self.assertEqual([(most, register) for _, _, most, register in solos], [(1, (60, 96))])   # a line, no bass
+        self.session.turn(part=0, hands=1, chord=1, solo_chord=1)   # as "it solos" leaves them: its bass walks all the same
+        self.assertEqual([(most, register) for _, _, most, register in self.session._hands(False, False)],
+                         [(3, (53, 76)), (1, (28, 51))])
         self.session.turn(part=1)                    # a duet: chords under you, a line when you rest, the bass on
         self.assertEqual([hand[2] for hand in self.session._hands(True, self.session._solos(1.0, True))], [3, 1])
         self.assertEqual([hand[2] for hand in self.session._hands(False, self.session._solos(1.0, False))], [1, 1])

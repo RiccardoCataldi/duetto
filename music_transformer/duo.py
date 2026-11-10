@@ -577,10 +577,11 @@ class DuoSession:
         return last + self.breath
 
     def _walks(self):
-        """Whether its left hand walks a bass over the tune: unless it solos for you to comp, has one hand, or its
-        octaves leave a bass no room."""
+        """Whether its left hand walks a bass over the tune: its part says so, whatever its `hands` (a preset for
+        playing without a tune may have left it one): unless it solos for you to comp, or its octaves leave a bass
+        no room."""
         low, high = self.octaves()
-        return bool(self.chart) and self.hands == 2 and self.part != 2 and max(low, BASS[0]) <= min(high, BASS[1])
+        return bool(self.chart) and self.part != 2 and max(low, BASS[0]) <= min(high, BASS[1])
 
     def _hands(self, you_play, solos=False):
         """(instrument, step, most notes at once, (lowest, highest) pitch) of each hand it plays with. Over a tune

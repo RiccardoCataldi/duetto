@@ -23,7 +23,7 @@ from theme import AI, FAINT, MUTED, TEXT, YOU, mix
 SIZE = (1280, 720)
 FPS = 60                  # live
 VIDEO_FPS = 30
-RANGE = (36, 96)          # live: C2 to C7; a video fits the octaves its notes use
+RANGE = (21, 108)         # live: the 88 keys of a piano, A0 to C8 (its bass walks from E1); a video fits the octaves its notes use
 KEYBOARD_H = 120
 SPEED = 140               # pixels a second the notes rise
 TAIL_S = 5                # seconds the video goes on after the last note, while the reverb dies away
