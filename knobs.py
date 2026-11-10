@@ -105,7 +105,7 @@ MODES = {'listening': 'waiting for you to play', 'accompanying': 'accompanying y
          'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn', 'waiting': 'your turn'}
 
 # the sections of the tabs: the model's knobs on the AI mind tab and in Advanced, and each one's sound
-TUNE = ('chart', 'part', 'bpm', 'metronome')   # playing along with a tune
+TUNE = ('chart', 'part', 'licks', 'bpm', 'metronome')   # playing along with a tune
 REGISTER = ('lowest', 'highest', 'root', 'scale')
 ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'answer', 'grid', 'phrase', 'breath', 'timeout',
                          'commit')),

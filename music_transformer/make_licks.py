@@ -1,15 +1,16 @@
 """
-Makes licks.json, the phrases the duo quotes when it solos over a tune (licks.py), from the Weimar Jazz Database of
-transcribed solos (wjazzd.db, from https://jazzomat.hfm-weimar.de, under the ODbL: so is licks.json):
+Makes licks.json.gz, the phrases the duo quotes when it solos over a tune (licks.py), from the Weimar Jazz Database of
+transcribed solos (wjazzd.db, from https://jazzomat.hfm-weimar.de, under the ODbL: so is licks.json.gz):
 
     python -m music_transformer.make_licks wjazzd.db
 
-A lick is one or two bars of a solo in 4/4 as they were played, kept with the chords under them: each note is
+A lick is one to four bars of a solo in 4/4 as they were played, kept with the chords under them: each note is
 (beats from the bar line, beats it lasts, semitones above the pitch class of the first chord's root), so that it is
 played in any key. Licks are filed under their chords: each one's kind (bebop.DEGREES'), its root in semitones above
 the first one's, and the beats it lasts.
 """
 import collections
+import gzip
 import json
 import os
 import random
@@ -18,10 +19,12 @@ import sqlite3
 import sys
 
 ROOTS = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
-STYLES = ('SWING', 'BEBOP', 'COOL', 'HARDBOP', 'POSTBOP')
-MOST = 40        # licks kept under the same chords, drawn by lot
-LEAST = 8        # chords with fewer licks than this are left out
-SPAN = 19        # a lick wider than this many semitones is left out
+STYLES = ('TRADITIONAL', 'SWING', 'BEBOP', 'COOL', 'HARDBOP', 'POSTBOP', 'FUSION')
+MOST = 600       # licks kept under the same chords, drawn by lot: nearly all of them
+LEAST = 2        # chords with fewer licks than this are left out
+SPAN = 19        # a lick of one or two bars wider than this many semitones is left out
+WIDE = 24        # and one of three or four bars wider than this
+LONGEST = 4      # bars of the longest licks
 
 
 def chord(name):
@@ -62,12 +65,14 @@ def licks(db):
             if beatdur:
                 bars[bar].append((beat - 1 + (tatum - 1) / max(division, 1), min(max(duration / beatdur, 0.1), 2), round(pitch)))
         for first in bars:
-            for length in (1, 2):
+            for length in range(1, LONGEST + 1):
                 under = [chords.get((first + b, beat)) for b in range(length) for beat in range(1, 5)]
                 notes = [(round((b * 4 + at) * 12) / 12, lasts, pitch) for b in range(length) for at, lasts, pitch in bars.get(first + b, [])]
                 pitches = [pitch for *_, pitch in notes]
-                if None in under or len(notes) < 3 * length + 1 or max(pitches) - min(pitches) > SPAN or \
-                        (length == 2 and (len(bars.get(first + 1, [])) < 2 or len(set(under)) == 1 and first % 2)):
+                later = [len(bars.get(first + b, [])) for b in range(1, length)]   # no bar of it is silent
+                if None in under or len(notes) < 3 * length + 1 or max(pitches) - min(pitches) > (SPAN, WIDE)[length > 2] \
+                        or (length > 1 and (min(later[:-1], default=2) < 2 or later[-1] < 4 - length or later[-1] < 1
+                                            or len(set(under)) == 1 and first % length)):
                     continue
                 low = min(pitches) - (min(pitches) - under[0][0]) % 12   # the root's pitch at or under its lowest note
                 yield key_of(under), (performer, title), [[round(at, 3), round(lasts, 2), pitch - low] for at, lasts, pitch in notes]
@@ -80,8 +85,8 @@ if __name__ == '__main__':
             found[key].append([players.setdefault(player, len(players)), notes])
     rng = random.Random(0)
     kept = {key: sorted(rng.sample(cells, min(len(cells), MOST))) for key, cells in sorted(found.items()) if len(cells) >= LEAST}
-    out = os.path.join(os.path.dirname(__file__), 'licks.json')
-    with open(out, 'w') as f:
+    out = os.path.join(os.path.dirname(__file__), 'licks.json.gz')
+    with gzip.open(out, 'wt') as f:
         json.dump({'source': 'Weimar Jazz Database, https://jazzomat.hfm-weimar.de, ODbL', 'players': list(players),
                    'licks': kept}, f, separators=(',', ':'))
     print(f"{sum(map(len, kept.values()))} licks under {len(kept)} chord sequences, {os.path.getsize(out) // 1024} kB")

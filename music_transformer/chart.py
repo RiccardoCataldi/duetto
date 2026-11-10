@@ -80,8 +80,8 @@ def bar_at(session, seconds):
 
 
 PHRASE = 2 * BEATS   # beats a soloist keeps to one way of playing the changes: two bars
-# the ways, as often as each is here; 'quote': a phrase of a great soloist's over these chords (licks.py)
-WAYS = ('quote',) * 5 + ('bebop',) * 4 + ('scale', 'arpeggio', 'pentatonic', 'blues')
+# the ways, as often as each is here, when it does not quote a great soloist (the duo's `licks` knob, licks.py)
+WAYS = ('bebop',) * 4 + ('scale', 'arpeggio', 'pentatonic', 'blues')
 
 
 def beats(session, seconds):
@@ -94,6 +94,18 @@ def way(session, seconds):
     the major pentatonic of the key is one more."""
     ways = WAYS + (('major_pentatonic',) if (CHARTS[session.chart - 1].key or 0) < 12 else ())
     return random.Random(session.varied + beats(session, seconds) // PHRASE).choice(ways)
+
+
+# the beats of a bar on which it comps a chord under its own solo, as often as each is here: on one, on the "and" of
+# two (the Charleston), both, pushing the next bar, or none
+STABS = ((), (), (0,), (0,), (1.5,), (1.5,), (0, 1.5), (0, 2.5), (1.5, 3.5), (3.5,))
+
+
+def stabs(session, bar):
+    """The beats from the line of the bar `bar` (counted on through the choruses) on which it comps a chord under
+    its own solo: others, by chance, each bar; an "and" on the last third of its beat when the tune swings."""
+    swing = CHARTS[session.chart - 1].swing
+    return [spot + (1 / 6 if swing and spot % 1 else 0) for spot in random.Random(session.varied * 13 + 5 + bar).choice(STABS)]
 
 
 FEELS = (2, 2, 2, 3, 3, 4, 4, 8, 0)   # how it divides the beat, as often as each is here; 0: out of time

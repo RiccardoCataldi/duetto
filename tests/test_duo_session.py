@@ -122,6 +122,68 @@ class DuoSessionTest(unittest.TestCase):
         self.assertTrue(all(abs(n[0] * 2 - round(n[0] * 2)) < 0.07 for n in notes if n[3] == 'left'))
         self.assertGreater(sum(n[3] == 'right' for n in notes), 5)
 
+    def test_over_a_tune_its_right_hand_plays_on_though_the_model_would_rather_walk_its_bass_alone(self):
+        class Bassist(UniformModel):
+            def __call__(self, inp, past_key_values=None, use_cache=True):
+                out = super().__call__(inp, past_key_values, use_cache)
+                out.logits[..., duo.TIME_OFFSET:duo.TIME_OFFSET + duo.MAX_TIME] += torch.arange(duo.MAX_TIME)   # on the
+                out.logits[..., NOTE_OFFSET + duo.LEFT * MAX_PITCH:NOTE_OFFSET + (duo.LEFT + 1) * MAX_PITCH] += 30   # beat, the bass
+                return out
+
+        for part, heard in ((0, False), (1, True), (1, False)):   # it comps; a duet, you playing or resting
+            session = DuoSession(Bassist(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=part,
+                                 max_rest=100, breath=60)
+            start = self.clock.t
+            session.hear(0.0, 0.3, 60)
+            notes = []
+            for step in range(200):
+                self.clock.t += 0.1
+                if heard and step % 5 == 0:
+                    session.hear(self.clock.t - start - 0.05, 0.3, 60 + step % 7)
+                while session.ahead() < duo.LOOKAHEAD:
+                    notes.append(session.play())
+            right = sorted(n[0] for n in notes if n and n[3] == 'right' and n[0] > 3)
+            self.assertGreater(len(right), 8, part)
+            self.assertLess(max(b - a for a, b in zip(right, right[1:])), 3.5, part)   # a second, a breath, a bar: it
+                                                                                      # takes the last moment it may
+            self.assertGreater(sum(bool(n) and n[3] == 'left' for n in notes), 30, part)   # and its bass walks on
+            self.clock.t = start
+
+    def test_soloing_over_its_walking_bass_it_comps_a_chord_now_and_then_under_its_line(self):
+        from music_transformer import chart
+        for knobs in ({'part': 1, 'licks': 0}, {'part': 1, 'licks': 1}, {'part': 1, 'licks': 0.5, 'grid': 0, 'bpm': 200},
+                      {'part': 0}, {'part': 2}):
+            clock = Clock()
+            session = DuoSession(UniformModel(), 'cpu', clock=clock, chart=self.tune('autumn_leaves'), **knobs)
+            session.hear(0.0, 0.3, 60)                       # then you rest: in a duet it solos
+            notes = []
+            for _ in range(300):
+                clock.t += 0.1
+                session.begin()
+                while session.ahead() < duo.LOOKAHEAD:
+                    notes.append(session.play())
+            beat = 60 / session.pace
+            first = session.began + 8 * beat                 # your note is long past: it no longer comps under you
+            notes = [note for note in notes if note and first <= note[0] < 30]
+            under = [n for n in notes if n[3] == 'right' and sum(m[0] == n[0] and m[3] == 'right' and
+                                                                 duo.UNDER[0] <= m[2] <= duo.UNDER[1] for m in notes) >= 3
+                     and duo.UNDER[0] <= n[2] <= duo.UNDER[1]]
+            chords = sorted({n[0] for n in under})
+            if knobs['part'] != 1:                           # it comps, or solos for you to comp: none of these
+                self.assertEqual([n for n in notes if n[2] < 60 and n[3] == 'right' and knobs['part'] == 2], [])
+                self.assertEqual(len(session._my_line(session.comp)), 0)
+                continue
+            bars = (30 - first) / (4 * beat)
+            self.assertTrue(0.5 * bars < len(chords) < 1.6 * bars, (len(chords), bars))   # about one a bar
+            for onset in chords:                             # where a pianist's left hand comps, three notes, short
+                bar, spot = divmod((onset - session.began) / beat + 0.02, 4)
+                self.assertTrue(any(abs(spot - 0.02 - at) < 0.2 for at in chart.stabs(session, int(bar))), (onset, spot))
+                self.assertIn(len({n[2] for n in under if n[0] == onset}), (3, 4))   # and a note of its line, at times
+                self.assertGreaterEqual(sum(n[1] <= 1.5 * beat + 0.01 for n in under if n[0] == onset), 3)
+            line = [n for n in notes if n[3] == 'right' and n not in under]
+            self.assertGreater(len(line), 2 * len(chords))   # its line goes on over them, and its bass under
+            self.assertGreater(sum(n[3] == 'left' for n in notes), 0.8 * 4 * bars)
+
     def test_over_a_tune_its_part_says_what_its_hands_do_whatever_the_other_knobs(self):
         self.session.turn(chart=self.tune('blues_in_f'), part=0)
         comps = self.session._hands(False, self.session._solos(1.0, False))
@@ -135,25 +197,79 @@ class DuoSessionTest(unittest.TestCase):
         self.session.turn(lowest=5, highest=6)       # its octaves still hold: C5 to B6, and no room for a bass there
         self.assertEqual([hand[3] for hand in self.session._hands(False, True)], [(72, 95)])
 
+    def solo(self, seconds, **knobs):
+        """(the session, its notes) after it soloed alone over Autumn Leaves (120 bpm: a bar is 2 s) for `seconds`."""
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=2, **knobs)
+        session.begin()
+        notes = []
+        for _ in range(round(seconds * 10)):
+            self.clock.t += 0.1
+            while session.ahead() < duo.LOOKAHEAD:
+                notes.append(session.play())
+        return session, [note for note in notes if note]
+
     def test_soloing_it_quotes_a_phrase_played_over_the_same_chords_in_the_key_of_the_tune(self):
         from music_transformer import licks
-        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=2)
-        with unittest.mock.patch('music_transformer.chart.way', return_value='quote'):
-            session.begin()
-            notes = []
-            for _ in range(45):                          # the first two bars: Cm7 | F7, 4 s
-                self.clock.t += 0.1
-                while session.ahead() < duo.LOOKAHEAD:
-                    notes.append(session.play())
-            self.assertIn(' · ', session.state()['chart'].get('quote', ''))
-        played = [(onset * 2, pitch) for onset, _, pitch, _ in notes if onset < 4.0]   # (beat, pitch)
-        ours = lambda lick: [(at + (1 / 6 if abs(at % 1 - 0.5) < 0.04 else 0), pitch) for at, _, pitch in lick]
-        fits = [lick for _, lick in licks.DATA['licks']['min.0.4 dom.5.4'] if all(
-            any(abs(at - beat) < 0.15 and (pitch - key) % 12 == 0 for at, key in ours(lick)) for beat, pitch in played)]
-        self.assertGreaterEqual(len(fits), 1)            # note for note, on C: the ii-V of some soloist (it came
-                                                         # in after its first notes: the duo had just begun)
-        self.assertGreater(len(played), 3)
+        session, notes = self.solo(2.5, licks=1)             # the first bar: Cm7, then F7
+        self.assertIn(' · ', session.state()['chart'].get('quote', ''))
+        quoted = session.quotes[0]
+        played = [(onset, pitch) for onset, _, pitch, _ in notes if onset <= quoted[-1][0] + 0.02]
+        self.assertGreater(len(played), 1)               # (it came in after its first notes: the duo had just begun)
+        for onset, pitch in played:                      # note for note
+            self.assertTrue(any(abs(onset - at) < 0.08 and pitch == note for at, note, _ in quoted), (onset, pitch))
+        ours = lambda lick: [(round(at + (1 / 6 if abs(at % 1 - 0.5) < 0.04 else 0), 2), pitch % 12) for at, _, pitch in lick]
+        mine = [(round(at * 2, 2), pitch % 12) for at, pitch, _ in quoted]
+        self.assertTrue(any(ours(lick) == mine for chords in licks.DATA['licks'] if chords.startswith('min.0.4')
+                            for _, lick in licks.DATA['licks'][chords]))   # on C: some soloist's, from a ii on
         self.assertEqual(licks.quote(random.Random(0), [(0, 'dim7')] * 3 + [(1, 'm7')] * 5, 60, 96, 72), None)
+
+    def test_its_licks_knob_says_how_much_of_its_solo_it_quotes(self):
+        quoted = {}
+        for share in (0.0, 0.5, 1.0):
+            session, _ = self.solo(0.5, licks=share)
+            bars = []
+            for bar in range(200):                           # the bars it comes to, one after another
+                session.quotes = {b: notes for b, notes in session.quotes.items() if b >= bar}
+                session._lick(session._tick(session.began + bar * 2.0 + 0.01))
+                bars.append(bool(session.quotes[bar]))
+            quoted[share] = sum(bars) / len(bars)
+        self.assertEqual((quoted[0.0], quoted[1.0]), (0, 1))   # its own lines only; one phrase after another
+        self.assertTrue(0.45 < quoted[0.5] < 0.55, quoted)     # half of its bars
+
+    def test_it_quotes_a_phrase_over_two_chords_wherever_in_the_tune_they_begin(self):
+        from music_transformer import licks
+        asked, real = [], licks.quote
+
+        def quote(rng, chords, *rest):
+            asked.append(chords)
+            return real(rng, chords[:4] if len(asked) == 1 else chords[:8], *rest)   # one bar first: Cm7, then two
+
+        with unittest.mock.patch('music_transformer.licks.quote', quote), unittest.mock.patch('music_transformer.licks.LONGER', 1):
+            session, notes = self.solo(7, licks=1)
+        # the next begins at the second bar, off the tune's pairs of bars: F7 | Bbmaj7, then Ebmaj7 | Am7b5
+        self.assertEqual([[chords[0], chords[4]] for chords in asked[:3]],
+                         [[(0, 'm7'), (5, '7')], [(5, '7'), (10, 'maj7')], [(3, 'maj7'), (9, 'm7b5')]])
+        self.assertEqual([len(notes_) > 3 for bar, notes_ in sorted(session.quotes.items())], [True] * len(session.quotes))
+        f7 = [pitch for onset, _, pitch, _ in notes if 2.0 <= onset < 4.0]
+        fits = [lick for _, lick in licks.DATA['licks']['dom.0.4 maj.5.4'] if all(
+            any((pitch - key - 5) % 12 == 0 for *_, key in lick) for pitch in f7)]
+        self.assertGreaterEqual(len(fits), 1)            # on F: a V-I of some soloist
+        self.assertGreater(len(f7), 0)
+
+    def test_it_quotes_one_soloist_whole_over_a_progression_of_as_many_as_four_bars(self):
+        from music_transformer import licks
+        with unittest.mock.patch('music_transformer.licks.LONGER', 1):
+            session, notes = self.solo(9, licks=1)           # Cm7 | F7 | Bbmaj7 | Ebmaj7: 8 s
+        whole = [[pitch % 12 for *_, pitch in lick] for _, lick in licks.DATA['licks']['min.0.4 dom.5.4 maj.10.4 maj.3.4']]
+        self.assertIn([pitch % 12 for _, pitch, _ in session.quotes[0]], whole)   # its ii-V-I-IV, one soloist's four bars
+        self.assertTrue(all(session.quotes[bar] is session.quotes[0] for bar in range(4)))
+        self.assertGreater(sum(4.0 <= onset < 8.0 for onset, *_ in notes), 2)   # and it plays them through
+        # a soloist it has just quoted is quoted again over the next chords, when they played them
+        with unittest.mock.patch('music_transformer.licks.SAME', 1):
+            name = licks.quote(random.Random(1), [(9, 'm7b5')] * 4 + [(2, '7')] * 4, 60, 96, 72, 'John Coltrane')[0]
+        self.assertEqual(name.split(' · ')[0], 'John Coltrane')
+        with unittest.mock.patch('music_transformer.licks.LONGER', 1):
+            self.assertEqual(licks.quote(random.Random(1), [(0, 'm7')] * 4 + [(5, '7')] * 4 + [(10, 'maj7')] * 4, 60, 96, 72)[2], 3)
 
     def test_over_a_tune_its_eighths_are_swung(self):
         session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=self.tune('autumn_leaves'), part=0, hands=1,
@@ -392,7 +508,7 @@ class DuoSessionTest(unittest.TestCase):
         from music_transformer.chart import CHARTS
         tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'autumn_leaves')   # 120 bpm: a beat is 0.5 s
         for division, step in ((3, 1 / 6), (4, 0.125)):
-            session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=tune + 1, part=2, hands=1, breath=0)
+            session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=tune + 1, part=2, hands=1, breath=0, licks=0)
             session.hear(0.0, 0.3, 60)
             with unittest.mock.patch('music_transformer.chart.feel', return_value=division), \
                     unittest.mock.patch('music_transformer.chart.way', return_value='bebop'):
