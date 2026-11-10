@@ -87,8 +87,8 @@ class DuoSessionTest(unittest.TestCase):
     def test_trading_fours_you_solo_four_bars_then_it_does(self):
         self.session.turn(chart=self.tune('blues_in_f'), part=3)
         bar = 4 * 60 / 110
-        self.assertEqual([self.session._solos(k * bar + 0.1, True) for k in (0, 3, 4, 7, 8)],
-                         [False, False, True, True, False])
+        self.assertEqual([self.session._solos(k * bar + 0.1, True) for k in (0, 3, 4, 7, 8, 12, 15, 16)],
+                         [False, False, True, True, False, True, True, False])   # on through the 12 bars' end
         self.session.hear(0.0, 0.3, 53)
         self.clock.t = 4.5 * bar
         self.assertEqual(self.session.state()['mode'], 'its turn')
@@ -120,6 +120,19 @@ class DuoSessionTest(unittest.TestCase):
         self.assertGreater(len(bass), 12)
         self.assertTrue(all(abs(n[0] * 2 - round(n[0] * 2)) < 0.07 for n in notes if n[3] == 'left'))
         self.assertGreater(sum(n[3] == 'right' for n in notes), 5)
+
+    def test_over_a_tune_its_part_says_what_its_hands_do_whatever_the_other_knobs(self):
+        self.session.turn(chart=self.tune('blues_in_f'), part=0)
+        comps = self.session._hands(False, self.session._solos(1.0, False))
+        self.assertEqual([(most, register) for _, _, most, register in comps], [(3, (53, 76)), (1, (28, 51))])
+        self.session.turn(part=2)
+        solos = self.session._hands(False, self.session._solos(1.0, False))
+        self.assertEqual([(most, register) for _, _, most, register in solos], [(1, (60, 96))])   # a line, no bass
+        self.session.turn(part=1)                    # a duet: chords under you, a line when you rest, the bass on
+        self.assertEqual([hand[2] for hand in self.session._hands(True, self.session._solos(1.0, True))], [3, 1])
+        self.assertEqual([hand[2] for hand in self.session._hands(False, self.session._solos(1.0, False))], [1, 1])
+        self.session.turn(lowest=5, highest=6)       # its octaves still hold: C5 to B6, and no room for a bass there
+        self.assertEqual([hand[3] for hand in self.session._hands(False, True)], [(72, 95)])
 
     def test_over_a_tune_its_eighths_are_swung(self):
         session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=self.tune('autumn_leaves'), part=0, hands=1,

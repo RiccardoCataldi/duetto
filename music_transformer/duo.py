@@ -81,6 +81,9 @@ RESOLVE = 6.0     # logit added to the chord tone it approached: the next note l
 TARGET = 1.5      # logit added to the chord's tones on the beat
 STYLE = 1.5       # how much it takes its notes over each chord from bebop soloists' habits (bebop.py)
 LINE = 1.5        # and how its line moves from one note to the next
+SOLO = (60, 96)   # over a tune, where its line is when it solos: from middle C to C7
+COMP = (53, 76)   # where its chords are when it comps: from F3 to E5
+BASS = (28, BASS_TOP - 1)   # and its walking bass: from E1
 WALK = 4.0        # logit added to the root where its walking bass begins a bar or a chord
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does
@@ -241,8 +244,8 @@ class DuoSession:
         """Whether it solos at session seconds `at` over a tune; otherwise it comps."""
         if not self.chart:
             return False
-        if self.part == 3:   # trading fours: yours first
-            return chart.bar_at(self, at)[0] // 4 % 2 == 1
+        if self.part == 3:   # trading fours: yours first, counted on through the choruses
+            return int(chart.beats(self, at) // chart.BEATS) // 4 % 2 == 1
         return self.part == 2 or (self.part == 1 and not you_play)
 
     def octaves(self):
@@ -262,8 +265,8 @@ class DuoSession:
 
     def ahead(self):
         """Ticks of music already sampled beyond now; the caller samples more while this is under LOOKAHEAD."""
-        walks = self.chart and self.hands == 2   # its bass walks on while its right hand breathes
-        now, last = self.now(), max(self._last_time(), 0 if walks else self._breath(), self._tick(self.cursor))
+        # its bass walks on while its right hand breathes
+        now, last = self.now(), max(self._last_time(), 0 if self._walks() else self._breath(), self._tick(self.cursor))
         return LOOKAHEAD + 5 if self._timed_out(max(last, now)) and not self.owed else last - now
 
     def hear(self, onset, duration, pitch, velocity=None):
@@ -333,7 +336,7 @@ class DuoSession:
         if not self.free:
             return None
         answering = self.heard_at is not None and not you_play and now - self.heard_at < self.answer
-        walks, breath = self.chart and self.hands == 2, self._breath()
+        walks, breath = self._walks(), self._breath()
         after = last if walks else max(last, breath)   # its bass walks on while its right hand breathes
         earliest = max(after, now + MARGIN, self._tick(self.began) if self.chart else 0)   # not in the count-in
         latest = min(max(earliest, after + (min(self.max_rest, self.run) if answering else self.max_rest)), MAX_TIME - 1)
@@ -346,7 +349,7 @@ class DuoSession:
             latest = min(latest, max(earliest, after + 2 * unit))
         # when each hand may play next: (instrument, its line, its register, its onsets as a mask over times)
         hands = []
-        for instrument, step, most, register in self._hands(you_play):
+        for instrument, step, most, register in self._hands(you_play, solos):
             if unit and instrument == self.me:
                 step = max(min(step, unit - self.grid), 5)   # its line may be as fast as that
             line, window = self._my_line(instrument), torch.full((MAX_TIME,), -float('inf'))
@@ -497,17 +500,29 @@ class DuoSession:
             return 0
         return round(self.spoken[-1] * TIME_RESOLUTION) - self.base + self.breath
 
-    def _hands(self, you_play):
-        """(instrument, step, most notes at once, (lowest, highest) pitch) of each hand it plays with."""
+    def _walks(self):
+        """Whether its left hand walks a bass over the tune: unless it solos for you to comp, has one hand, or its
+        octaves leave a bass no room."""
         low, high = self.octaves()
-        # over a tune both of you play on: it does not thin out to leave you room
-        right = (self.me, self.space if you_play and not self.chart else self.min_step,
-                 self.chord if you_play else self.solo_chord)
+        return bool(self.chart) and self.hands == 2 and self.part != 2 and max(low, BASS[0]) <= min(high, BASS[1])
+
+    def _hands(self, you_play, solos=False):
+        """(instrument, step, most notes at once, (lowest, highest) pitch) of each hand it plays with. Over a tune
+        its part says what they do, whatever the texture knobs: soloing (`solos`), a line of single notes from
+        middle C up; comping, chords in the middle of the keyboard; and under either, unless it solos for you to
+        comp, a walking bass: a note a beat."""
+        low, high = self.octaves()
+        if self.chart:
+            within = lambda lowest, highest: (max(low, lowest), min(high, highest)) \
+                if max(low, lowest) <= min(high, highest) else (low, high)
+            right = (self.me, self.min_step, 1, within(SOLO[0], SOLO[1])) if solos else \
+                (self.me, self.min_step, max(self.chord, 3), within(COMP[0], COMP[1]))
+            beat = max(round(60 / self.pace * TIME_RESOLUTION) - self.grid - 1, 5)
+            return [right] + ([(self.left, beat, 1, within(BASS[0], BASS_TOP - 1))] if self._walks() else [])
+        right = (self.me, self.space if you_play else self.min_step, self.chord if you_play else self.solo_chord)
         if self.hands == 1:
             return [(*right, (low, high))]
         left = (self.left, self.left_step, LEFT_CHORD, (low, min(high, LEFT_TOP)))
-        if self.chart:   # a walking bass: a note a beat, under the chords
-            left = (self.left, max(round(60 / self.pace * TIME_RESOLUTION) - self.grid - 1, 5), 1, (low, min(high, BASS_TOP - 1)))
         hands = [(*right, (max(low, RIGHT_BOTTOM), high)), left]
         hands = [hand for hand in hands if hand[3][0] <= hand[3][1]]   # its octaves may leave room for one hand only
         return hands or [(*right, (low, high))]
