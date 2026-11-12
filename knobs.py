@@ -97,7 +97,7 @@ ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'an
             ('Imagination', ('temperature', 'top_p', 'self_window')),
             ('Memory of you', ('recall', 'silence', 'sparse', 'decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic',
                                'itself', 'probabilistic')),
-            ('Tune', ('chart', 'playing', 'part', 'licks', 'bpm', 'metronome')),
+            ('Tune', ('chart', 'playing', 'part', 'licks', 'pickup', 'bpm', 'metronome')),
             ('Range & key', ('lowest', 'highest', 'root', 'scale'))]
 SOUND_GROUPS = [('Mix', ('volume', 'pan', 'reverb')),
                 ('Envelope', ('attack', 'decay', 'sustain', 'release')), ('Delay', ('echo', 'delay', 'feedback'))]

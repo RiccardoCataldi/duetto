@@ -50,6 +50,11 @@ A phrase of one to four bars filed under the chords it was played over, free of 
 Weimar Jazz Database) or **yours**, from what you played over a Tune.
 _Avoid_: quote (that is the act of playing a Lick)
 
+**Pickup**:
+The one to three notes that lead from one Lick into the next when there is room between them: a walk up or down the
+scale, a chromatic approach off the beat, or an enclosure of the next Lick's first note.
+_Avoid_: bridge (that is a Tune's B section), interpolation
+
 **Recall**:
 How closely it follows its memory of you: in Free Mode the Somax-style corpus of your playing, over a Tune your Licks.
 _Avoid_: memory (as a Knob name)

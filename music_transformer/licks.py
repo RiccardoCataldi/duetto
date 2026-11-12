@@ -20,6 +20,28 @@ SAME = 0.8     # how often, when the soloist it last quoted played over these ch
 FEW = 6        # chords played by fewer soloists than this are quoted less often: it would say the same thing again
 
 
+def pickup(last, target, room, scale, chromatic=True):
+    """The pitches that lead from `last`, the last note of a phrase, into `target`, the first of the next, as bebop
+    players join them: `room` of them at most, and never more than three. The one before the target approaches it
+    by a semitone, from the side the line comes from (by a step of `scale`, 12 pitch classes, when `chromatic` is
+    False: it falls on the beat); those before it walk up to it by steps of the scale, no further back than `last`.
+    With no room to walk and room for two, they enclose the target: the step of the scale beyond it, then the
+    approach. None when the approach would be `last` again."""
+    way = 1 if target >= last else -1
+
+    def step(pitch, way):
+        return next(pitch + way * k for k in range(1, 13) if scale[(pitch + way * k) % 12])
+
+    notes = [target - way if chromatic else step(target, -way)]
+    if room < 1 or notes[0] == last:
+        return []
+    while len(notes) < min(room, 3) and (step(notes[0], -way) - last) * way > 0:
+        notes.insert(0, step(notes[0], -way))
+    if len(notes) == 1 and room > 1:
+        notes.insert(0, step(target, way))
+    return notes
+
+
 def quote(library, rng, chords, low, high, near, like=None, most=LONGEST):
     """A phrase of `library` (DATA's form) to play over `chords`, the (root, kind in listener.CHORDS) of each beat
     of the bars to come: one played whole over the same chords from the first bar on, a fourth up or a tone down as

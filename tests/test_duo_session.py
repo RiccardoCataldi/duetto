@@ -410,6 +410,47 @@ class DuoSessionTest(unittest.TestCase):
         with unittest.mock.patch('music_transformer.licks.LONGER', 1):
             self.assertEqual(licks.quote(licks.DATA, random.Random(1), [(0, 'm7')] * 4 + [(5, '7')] * 4 + [(10, 'maj7')] * 4, 60, 96, 72)[2], 3)
 
+    def test_a_pickup_leads_into_the_next_phrase_by_step_with_a_chromatic_approach_or_encloses_it(self):
+        from music_transformer import licks
+        c_major = [pc in (0, 2, 4, 5, 7, 9, 11) for pc in range(12)]
+        lead = lambda last, target, room, chromatic=True: licks.pickup(last, target, room, c_major, chromatic)
+        self.assertEqual(lead(71, 74, 2), [72, 73])        # B | C C# | D: a passing note, then the chromatic approach
+        self.assertEqual(lead(71, 74, 1), [73])            # room for one note: the approach alone
+        self.assertEqual(lead(71, 74, 3), [72, 73])        # no further back than the note it left
+        self.assertEqual(lead(65, 74, 5), [71, 72, 73])    # three notes at most
+        self.assertEqual(lead(77, 74, 2), [76, 75])        # from over it: F | E Eb | D
+        self.assertEqual(lead(72, 74, 2), [76, 73])        # too near to walk: an enclosure, C | E C# | D
+        self.assertEqual(lead(74, 74, 3), [76, 73])        # and the same note again
+        self.assertEqual(lead(71, 72, 2), [])              # a semitone from it already: nothing to add
+        self.assertEqual(lead(71, 74, 0), [])              # no room
+        self.assertEqual(lead(69, 74, 1, False), [72])     # the approach falls on the beat: a step of the scale
+
+    def test_now_and_then_it_leads_from_a_phrase_it_quotes_into_the_next(self):
+        first, later = [(0, 0.5, 72), (1, 0.5, 70), (2, 0.5, 69)], [(0, 0.5, 72), (1, 0.5, 75)]   # ends on A; begin on C
+
+        def quoting():   # one bar each, as they are here, whatever the chords
+            phrases = iter([first])
+            return unittest.mock.patch('music_transformer.licks.quote',
+                                       lambda *_: ('someone · a tune', next(phrases, later), 1))
+
+        with quoting():
+            session, notes = self.solo(2.5, licks=1, pickup=1)   # a bar is 2 s, a beat 0.5 s
+        # over Cm7, after the A on three: Bb on four, B on its "and", swung, and the C on one
+        way = [(onset, pitch) for onset, _, pitch, hand in notes if hand == 'right' and pitch >= 70 and 1.2 < onset < 1.95]
+        self.assertEqual([pitch for _, pitch in way], [70, 71], way)
+        self.assertTrue(abs(way[0][0] - 1.5) < 0.03 and abs(way[1][0] - 1.5 - 0.5 * 2 / 3) < 0.03, way)
+        self.assertTrue(any(abs(onset - 2.0) < 0.03 and pitch == 72 for onset, _, pitch, _ in notes))
+        with quoting():
+            session, _ = self.solo(2.5, licks=1, pickup=0)       # at 0, the phrases as they were played
+        self.assertEqual([pitch for _, pitch, _ in session.quotes[1]], [72, 75])
+        with quoting():
+            session, _ = self.solo(0.5, licks=1, pickup=0.5)
+            led = []
+            for bar in range(1, 200):                            # the bars it comes to, one after another
+                session._lick(session._tick(session.began + bar * 2.0 + 0.01))
+                led.append(len(session.quotes[bar]) > len(later))
+        self.assertTrue(0.35 < sum(led) / len(led) < 0.65, sum(led))   # half of the times
+
     def test_a_phrase_you_play_over_a_ii_v_comes_back_at_another_as_much_as_it_recalls_you(self):
         from music_transformer import licks
         self.enterContext(unittest.mock.patch.dict(licks.DATA, {'licks': {}}))   # no soloist to quote: you only

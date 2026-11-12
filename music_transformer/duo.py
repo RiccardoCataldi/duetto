@@ -145,6 +145,8 @@ KNOBS = {
                 "silences it; never kept, so a tune never starts by itself"),
     'licks': (0.4, 0.0, 1.0, '', "over a tune, how much of its solo is phrases of the great soloists, or yours, note for note, "
               "each over the chords it was played over: 0: none, its own lines only; at the top: one after another"),
+    'pickup': (0.5, 0.0, 1.0, '', "how often, when one phrase it quotes follows another and there is room between "
+               "them, it leads into the next: by step, with a chromatic approach off the beat, or enclosing its first note"),
     'part': (1, 0, 3, 'choice:comps/duet/solos/trades', "over a tune: it comps, with a walking bass, for you to solo; "
              "duet: it comps while you play and solos when you rest; it solos as a jazz player does, for you to comp; "
              "or you trade fours: four bars of your solo, then four of its own"),
@@ -154,7 +156,7 @@ RECALLED = ('decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic', 'itse
 MODES = {**dict.fromkeys(KNOBS, ('free', 'tune')),
          **dict.fromkeys(('space', 'solo_chord', 'timeout', 'silence', 'sparse', *RECALLED, 'hands', 'left_step', 'root',
                           'scale'), ('free',)),
-         **dict.fromkeys(('licks', 'part', 'playing'), ('tune',))}
+         **dict.fromkeys(('licks', 'pickup', 'part', 'playing'), ('tune',))}
 
 
 def acting(knobs):
@@ -680,14 +682,27 @@ class DuoSession:
         yours (_learn), when you played over these chords: your last phrase there as often as `echo` is of its top,
         or any of them; the others a great soloist's, by the one it last quoted when they played these chords too.
         While it comps (`solos` False) it quotes you only, where its line would be. It plays it as it was played,
-        in the key of the tune, swung as the tune is; what you make it sample again it plays again."""
+        in the key of the tune, swung as the tune is; what you make it sample again it plays again.
+        Once a phrase that ends in this bar is over it looks to the next bar: when another begins there, as often
+        as `pickup` says it leads into it (_pickup), and those notes come first."""
         beat, at = 60 / self.pace, self._seconds(earliest)
-        bar = int((chart.beats(self, at) + 0.5) // chart.BEATS)
+        bar = here = int((chart.beats(self, at) + 0.5) // chart.BEATS)
+        line = self._my_line()
+        played = line[-1][0] if line else -1
+
+        def coming(bar):
+            """The notes of the phrase of `bar` it has yet to play."""
+            return [(max(tick, earliest), pitch, lasts) for tick, pitch, lasts in
+                    ((self._tick(seconds), pitch, lasts) for seconds, pitch, lasts in self.quotes[bar])
+                    if played < tick < MAX_TIME and tick >= earliest - LATE]
+
+        if self.pickup and solos and self.quotes.get(bar) and self.quotes.get(bar + 1) is not self.quotes[bar] \
+                and not coming(bar) and self._solos(self.began + ((bar + 1) * chart.BEATS + 0.01) * beat, False):
+            bar += 1   # (trading fours, the next bar may be yours: then it leads nowhere)
         if bar not in self.quotes:
             self._learn()
             start, rng = self.began + bar * chart.BEATS * beat, random.Random(self.varied * 7 + bar)
             low, high = self._hands(False, True)[0][3]
-            line = self._my_line()
             near = (line[-1][1] - NOTE_OFFSET) % MAX_PITCH if line else (low + high) // 2
             ahead = 4 - bar % 4 if self.part == 3 else licks.LONGEST   # trading fours: no further than its four
             # by chance, but never far from its share of the bars so far
@@ -709,19 +724,32 @@ class DuoSession:
                 phrase = [(start + (at_ + (1 / 6 if swing and abs(at_ % 1 - 0.5) < 0.04 else 0)) * beat, pitch,
                            max(round(lasts * beat * TIME_RESOLUTION), 1)) for at_, lasts, pitch in found[1]]
                 self.quoting = (found[0], phrase[-1][0])
+                before = self.quotes.get(bar - 1)   # the phrase that ends where this one begins
+                if before and solos and rng.random() < self.pickup:
+                    phrase = self._pickup(before[-1], bar * chart.BEATS + found[1][0][0], phrase[0][1]) + phrase
             self.quotes = {b: notes for b, notes in self.quotes.items() if b >= bar - licks.LONGEST}
             self.quotes.update({bar + k: phrase for k in range(found[2] if found else 1)})
             if solos:   # `licks` is a share of its solo: the bars it comps are not owed any
                 self.quoted = [self.quoted[0] + (found[2] if found else 0), self.quoted[1] + (found[2] if found else 1)]
         if not solos and (not self.quoting or self.quoting[0] != 'you'):
             return None   # a soloist's phrase waits for its solo, as it did
-        line = self._my_line()
-        played = line[-1][0] if line else -1
-        for seconds, pitch, lasts in self.quotes[bar]:
-            tick = self._tick(seconds)
-            if tick > played and tick >= earliest - LATE and tick < MAX_TIME:
-                return max(tick, earliest), pitch, lasts
-        return None
+        notes = coming(bar)
+        if bar != here:   # its way into the next phrase only: the phrase itself waits for its bar
+            notes = [note for note in notes if note[0] < self._tick(self.began + bar * chart.BEATS * beat)]
+        return notes[0] if notes else None
+
+    def _pickup(self, last, at, target):
+        """The notes, as a phrase's, that lead from `last`, the last note of the phrase it quoted, into the pitch
+        `target`, the first of the next, `at` beats into the tune (licks.pickup): eighths, swung as the tune is, the
+        last of them an eighth before `target`, in the room the two leave once `last` has sounded."""
+        beat, swing = 60 / self.pace, chart.CHARTS[self.chart - 1].swing
+        left = (last[0] - self.began) / beat
+        first = math.ceil(2 * max(left + 0.3, left + last[2] / TIME_RESOLUTION / beat - 0.25))   # eighths into the tune
+        final = math.floor(2 * (at - 0.45))
+        when = lambda eighth: self.began + (eighth / 2 + (1 / 6 if swing and eighth % 2 else 0)) * beat
+        pitches = licks.pickup(last[1], target, final - first + 1, self.listener.chord_scale(when(final)), final % 2 == 1)
+        return [(when(final - k), pitch, max(round(beat * TIME_RESOLUTION / 2), 1))
+                for k, pitch in zip(range(len(pitches) - 1, -1, -1), pitches)]
 
     def _learn(self):
         """Your phrases over the tune become Licks of yours, in the form of licks.DATA's: each run of your right
