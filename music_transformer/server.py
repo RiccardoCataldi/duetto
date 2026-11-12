@@ -2,7 +2,7 @@
 Serve the duo over TCP so the model can run on another machine (e.g. one with a GPU).
 
     python -m music_transformer.server            # listens on 127.0.0.1:8765
-    ssh -N -L 8765:localhost:8765 raichu          # on the laptop, then AMT_SERVER=localhost:8765
+    ssh -N -L 8765:localhost:8765 gpu             # on the laptop, then AMT_SERVER=localhost:8765
 
 One line per message, times in seconds since the connection opened:
     client -> server   "hello"                           the duo begins (any first line does; without it, at your

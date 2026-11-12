@@ -15,7 +15,7 @@ The model is the pretrained [Anticipatory Music Transformer](https://github.com/
 ## Run it
 
 ```bash
-./run_duet.sh                                                      # AMT medium on raichu
+./run_duet.sh                                                      # AMT medium on the GPU host
 SERVER_ARGS="--model ~/models/music-large-800k" ./run_duet.sh      # the large model
 DUET_HOST=other-pc ./run_duet.sh                                   # another GPU host
 ```
@@ -93,7 +93,7 @@ The words used across code and panel are defined in [CONTEXT.md](CONTEXT.md).
 <details>
 <summary>Setup and on one machine</summary>
 
-- **GPU host**: the repo in `~/Ai-Duet`, a venv with `pip install -r requirements.txt`, the model in `~/models/music-medium-800k` (and optionally `music-large-800k`), `ssh raichu` (or your `DUET_HOST`) working with a key.
+- **GPU host**: the repo in `~/Ai-Duet`, a venv with `pip install -r requirements.txt`, the model in `~/models/music-medium-800k` (and optionally `music-large-800k`), `ssh gpu` (an alias in `~/.ssh/config`, or set `DUET_HOST`) working with a key.
 - **Laptop**: FluidSynth with FluidR3_GM, and a venv with `pip install mido python-rtmidi pygame imageio-ffmpeg`. A sampled grand at `~/sf2/SalamanderGrandPiano.sf2` ([Salamander](https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html), or `SOUNDFONT=path/to.sf2`) plays over FluidR3_GM.
 - **On one machine**: `python -m music_transformer.server` (it downloads the model and picks CUDA, Apple Silicon or the CPU), then FluidSynth (`fluidsynth -a pipewire -m alsa_seq -i -s /usr/share/sounds/sf2/FluidR3_GM.sf2 &` and `aconnect "Midi Through" "FLUID Synth"`), `python main.py` and `python pianoroll.py`.
 - **Tests**: `python -m unittest discover -s tests` (the model's need torch and `anticipation`).
