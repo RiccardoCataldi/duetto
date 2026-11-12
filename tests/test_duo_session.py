@@ -224,7 +224,7 @@ class DuoSessionTest(unittest.TestCase):
         mine = [(round(at * 2, 2), pitch % 12) for at, pitch, _ in quoted]
         self.assertTrue(any(ours(lick) == mine for chords in licks.DATA['licks'] if chords.startswith('min.0.4')
                             for _, lick in licks.DATA['licks'][chords]))   # on C: some soloist's, from a ii on
-        self.assertEqual(licks.quote(random.Random(0), [(0, 'dim7')] * 3 + [(1, 'm7')] * 5, 60, 96, 72), None)
+        self.assertEqual(licks.quote(licks.DATA, random.Random(0), [(0, 'dim7')] * 3 + [(1, 'm7')] * 5, 60, 96, 72), None)
 
     def test_its_licks_knob_says_how_much_of_its_solo_it_quotes(self):
         quoted = {}
@@ -243,9 +243,9 @@ class DuoSessionTest(unittest.TestCase):
         from music_transformer import licks
         asked, real = [], licks.quote
 
-        def quote(rng, chords, *rest):
+        def quote(library, rng, chords, *rest):
             asked.append(chords)
-            return real(rng, chords[:4] if len(asked) == 1 else chords[:8], *rest)   # one bar first: Cm7, then two
+            return real(library, rng, chords[:4] if len(asked) == 1 else chords[:8], *rest)   # one bar first: Cm7, then two
 
         with unittest.mock.patch('music_transformer.licks.quote', quote), unittest.mock.patch('music_transformer.licks.LONGER', 1):
             session, notes = self.solo(7, licks=1)
@@ -269,10 +269,36 @@ class DuoSessionTest(unittest.TestCase):
         self.assertGreater(sum(4.0 <= onset < 8.0 for onset, *_ in notes), 2)   # and it plays them through
         # a soloist it has just quoted is quoted again over the next chords, when they played them
         with unittest.mock.patch('music_transformer.licks.SAME', 1):
-            name = licks.quote(random.Random(1), [(9, 'm7b5')] * 4 + [(2, '7')] * 4, 60, 96, 72, 'John Coltrane')[0]
+            name = licks.quote(licks.DATA, random.Random(1), [(9, 'm7b5')] * 4 + [(2, '7')] * 4, 60, 96, 72, 'John Coltrane')[0]
         self.assertEqual(name.split(' · ')[0], 'John Coltrane')
         with unittest.mock.patch('music_transformer.licks.LONGER', 1):
-            self.assertEqual(licks.quote(random.Random(1), [(0, 'm7')] * 4 + [(5, '7')] * 4 + [(10, 'maj7')] * 4, 60, 96, 72)[2], 3)
+            self.assertEqual(licks.quote(licks.DATA, random.Random(1), [(0, 'm7')] * 4 + [(5, '7')] * 4 + [(10, 'maj7')] * 4, 60, 96, 72)[2], 3)
+
+    def test_a_phrase_you_play_over_a_ii_v_comes_back_at_another_as_much_as_it_recalls_you(self):
+        from music_transformer import licks
+        self.enterContext(unittest.mock.patch.dict(licks.DATA, {'licks': {}}))   # no soloist to quote: you only
+        tune = self.tune('all_the_things_you_are')           # at 240 bpm a bar is 1 s
+        first = list(zip((1.5, 1.75, 2.0, 2.25, 2.5, 2.75), (65, 68, 72, 70, 67, 63)))        # over Bbm7 | Eb7
+        second = list(zip((16.5, 16.75, 17.0, 17.25, 17.5, 17.75), (76, 72, 69, 66, 64, 62)))  # over Am7 | D7
+        for part, recall in ((0, duo.EXACT), (2, duo.EXACT), (2, 0)):   # it comps, it solos
+            clock = Clock()
+            session = DuoSession(UniformModel(), 'cpu', clock=clock, chart=tune, bpm=240, part=part, licks=1,
+                                 recall=recall, echo=6, max_rest=50)   # (no long rest: it is there as a phrase begins)
+            yours, notes, whose = first + second, [], set()
+            while clock.t < 27.9:
+                clock.t += 0.1
+                session.begin()
+                while yours and yours[0][0] <= clock.t:
+                    session.hear(yours[0][0], 0.2, yours.pop(0)[1])
+                while session.ahead() < duo.LOOKAHEAD:
+                    notes.append(session.play())
+                whose.add(session.state()['chart'].get('quote'))
+            back = lambda phrase, later, up: any(all(any(
+                note and abs(note[0] - at - later) < 0.08 and note[2] == pitch + shift for note in notes)
+                for at, pitch in phrase) for shift in (up, up + 12))
+            # eight bars on, over Fm7 | Bb7, the first a fifth up, note for note; and at the next Bbm7 | Eb7 the one
+            # you played last over a ii-V, a semitone up: its `echo` is at the top. The piano roll says whose it is
+            self.assertEqual((back(first, 8, 7), back(second, 9, 1), 'you' in whose), (recall > 0,) * 3, (part, recall))
 
     def test_over_a_tune_its_eighths_are_swung(self):
         session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=self.tune('autumn_leaves'), part=0, hands=1,
