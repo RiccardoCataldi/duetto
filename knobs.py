@@ -1,10 +1,10 @@
 """
 The controls beside the piano roll, in two tabs:
-- Play: the Tune, then in the Free Mode the Presets and over a Tune the Part it plays; the Character (density,
-  harmony, role...), each control turning some of the model's Knobs (see music_transformer/server.py, "knobs"); the
-  octaves it may play
+- Play: the Tune, Play or Stop with the metronome beside it, the Part it plays; the Character (density, harmony,
+  role...), each control turning some of the model's Knobs (see music_transformer/server.py, "knobs"); the octaves
+  it may play
 - Sound: your piano's and its own in FluidSynth on this laptop (sound.py)
-F2 opens Advanced: the Knobs that act in the Mode it plays in, each on its own (the server says which act). Drag a
+F2 opens Advanced: the model's Knobs, each on its own. Drag a
 slider (Shift: finely), click a stepper's arrows, press the arrow keys or turn the wheel with Ctrl over either; a
 double click puts it back. The wheel scrolls the tab.
 """
@@ -29,76 +29,53 @@ TITLE_H = 40              # a section's title
 SLIDER_H = 52
 MACRO_H = 66              # a musical control: a slider with its two ends under it
 STEPPER_H = 70
-CARD_H = 40               # a Preset, a Part
+CARD_H = 40               # Play, the metronome, a Part
 ARROW_W = 30              # a stepper's arrows
 THUMB_R = 7
 DRAG = 220                # pixels of drag across a stepper's whole range
 STEPS = 50                # wheel steps across a knob's range
 DOUBLE_CLICK_S = 0.35
 STEP_KEYS = {pygame.K_LEFT: -1, pygame.K_DOWN: -1, pygame.K_RIGHT: 1, pygame.K_UP: 1}
-# the model's knobs as last turned; mind.json, from before the Modes, is left as it was and never read
+# the model's knobs as last turned
 MIND_FILE = os.path.expanduser('~/.config/ai-duet/knobs.json')
 
 # the musical controls: label, its two ends, what it does, and the model's knobs it turns, each at (0, middle, 1);
 # the middle is the duo's default
 MACROS = [
     ('density', ('sparse', 'dense'), "how many notes it plays",
-     {'min_step': (60, 20, 8), 'space': (150, 50, 15), 'max_rest': (500, 200, 100), 'left_step': (120, 40, 15),
-      'phrase': (6, 16, 40), 'breath': (300, 150, 50)}),
-    ('harmony', ('inside', 'outside'), "how far it strays from your key, and how it colours the chord you play",
+     {'min_step': (60, 20, 8), 'max_rest': (500, 200, 100), 'phrase': (6, 16, 40), 'breath': (300, 150, 50)}),
+    ('harmony', ('inside', 'outside'), "how far it strays from the scale of the bar's chord, and how it colours the chord",
      {'out_of_key': (5.0, 2.0, 0.0), 'chord_tone': (3.0, 1.0, 0.0), 'tension': (0.0, 1.0, 3.0)}),
     ('role', ('accompanies', 'leads'), "while you play: it keeps apart from your hands and under your melody, or goes "
                                        "anywhere; when you rest: it comps on, or takes the melody, up where yours was",
      {'apart': (4.0, 2.0, 0.0), 'lead': (0.0, 3.0, 6.0)}),
     ('dialogue', ('ignores you', 'answers you'), "when your phrase ends: how soon and how closely it answers it",
      {'answer': (0, 400, 1000), 'echo': (0.0, 3.0, 6.0)}),
-    ('groove', ('loose', 'tight'), "how closely its notes sit on your pulse",
+    ('groove', ('loose', 'tight'), "how closely its notes sit on the beat",
      {'grid': (20, 2, 0)}),
     ('risk', ('safe', 'adventurous'), "how surprising its choices are",
      {'temperature': (0.7, 1.0, 1.4), 'top_p': (0.85, 0.98, 1.0)}),
     ('focus', ('on you', 'on itself'), "whose playing it builds on: yours, or its own line too",
      {'self_window': (50, 200, 2000)}),
-    ('memory', ('invents', 'remembers'), "how much it builds on what you played, and how often it leaves it out to keep silent",
-     {'recall': (0.0, 4.0, 10.0), 'silence': (0.0, 0.1, 0.4)}),
-    ('key follow', ('steady', 'quick'), "how soon it follows you: into a new key, or over a tune to a chord you hold",
+    ('memory', ('the soloists', 'you'), "whose phrases it quotes: the great soloists', or the ones you played over the tune",
+     {'recall': (0.0, 4.0, 10.0)}),
+    ('key follow', ('steady', 'quick'), "how soon it leaves the tune's chord for one you hold",
      {'stay': (0.995, 0.97, 0.85)}),
 ]
-# the Presets, of the Free Mode: name, what it does, its musical controls (0 to 1; one left out stands in the middle)
-# and the Free Mode's knobs it sets (one any other preset sets and it leaves out goes back to its default), never
-# the Part or a Tune's
-PRESETS = [
-    ('duet', "the duo's defaults: it comps while you play, answers your phrases, breathes and plays on for a while when you rest", {}, {}),
-    ('call & response', "it keeps quiet while you play, then answers each phrase at once with a run built on your "
-                        "intervals, and takes the melody",
-     {'dialogue': 1.0, 'role': 0.75, 'density': 0.9, 'risk': 0.65, 'focus': 0.6},
-     {'space': 150, 'chord': 1, 'hands': 1, 'echo': 3.0, 'run': 30}),
-    ('it comps', "it plays the harmony, low and steady with both hands, and keeps comping when you rest: you improvise",
-     {'role': 0.0, 'dialogue': 0.0, 'density': 0.4, 'harmony': 0.4, 'groove': 1.0, 'risk': 0.3, 'key follow': 0.3},
-     {'chord': 4, 'solo_chord': 4, 'hands': 2, 'lowest': 2, 'highest': 4, 'timeout': 6000}),
-    ('it solos', "you play the harmony, it improvises a line over it, up high",
-     {'role': 0.85, 'dialogue': 0.3, 'density': 0.8, 'harmony': 0.6, 'groove': 0.7, 'risk': 0.75, 'focus': 0.8},
-     {'chord': 1, 'solo_chord': 1, 'hands': 1, 'lowest': 5, 'highest': 7}),
-    ('free', "outside your key and off your pulse, surprising and dense: free improvisation together",
-     {'harmony': 1.0, 'risk': 1.0, 'groove': 0.0, 'density': 0.75, 'focus': 0.8, 'key follow': 1.0}, {}),
-]
-PRESET_KNOBS = {name for *_, turns in PRESETS for name in turns}
-# the Parts over a Tune, in the place of the Presets: name, the value of the knob `part`, what it plays
+# the Parts over the Tune: name, the value of the knob `part`, what it plays
 PARTS = [('comps', 0, "it comps, with a walking bass, for you to solo"),
          ('solos', 2, "it solos as a jazz player does, for you to comp"),
          ('duet', 1, "it comps while you play and solos when you rest"),
          ('trade fours', 3, "four bars of your solo, then four of its own")]
 
 # the sections of Advanced, and of each piano's sound
-ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'answer', 'grid', 'phrase', 'breath', 'timeout',
-                         'commit')),
+ADVANCED = [('Tune', ('chart', 'playing', 'part', 'licks', 'pickup', 'recall', 'bpm', 'metronome')),
+            ('Timing', ('min_step', 'max_rest', 'run', 'answer', 'grid', 'phrase', 'breath', 'commit')),
             ('Harmony', ('out_of_key', 'chord_tone', 'tension', 'stay')),
-            ('Texture', ('chord', 'solo_chord', 'hands', 'no_repeat')),
+            ('Texture', ('chord', 'no_repeat')),
             ('Role & dialogue', ('apart', 'lead', 'echo')),
             ('Imagination', ('temperature', 'top_p', 'self_window')),
-            ('Memory of you', ('recall', 'silence', 'sparse', 'decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic',
-                               'itself', 'probabilistic')),
-            ('Tune', ('chart', 'playing', 'part', 'licks', 'pickup', 'bpm', 'metronome')),
-            ('Range & key', ('lowest', 'highest', 'root', 'scale'))]
+            ('Range', ('lowest', 'highest'))]
 SOUND_GROUPS = [('Mix', ('volume', 'pan', 'reverb')),
                 ('Envelope', ('attack', 'decay', 'sustain', 'release')), ('Delay', ('echo', 'delay', 'feedback'))]
 
@@ -134,16 +111,14 @@ class Knob:
         if self.unit == 'program':
             return sound.GM[value]
         if self.unit == 'bpm':
-            return f"{value} bpm" if value else 'yours'
+            return f"{value} bpm" if value else "the tune's"
         if self.unit.startswith('choice:'):
-            return self.unit[7:].split('/')[value].replace('_', ' ')
+            return self.unit[7:].split('/')[value - round(self.low)].replace('_', ' ')
         if self.unit in ('octave_from', 'octave_to'):
             return f"{'C' if self.unit == 'octave_from' else 'B'}{value}"
         if self.unit == 'pan':
             side = round((value - 64) / 63 * 100)
             return 'centre' if side == 0 else f"{'L' if side < 0 else 'R'} {abs(side)}%"
-        if self.unit == 'hands':
-            return 'one hand' if value == 1 else 'two hands'
         if self.unit == 'ms':
             return f"{value} ms"
         if self.unit == 'times':
@@ -202,8 +177,7 @@ class Mind:
                 for line in lines:
                     if line.strip() == 'ready':
                         break
-                    # its Modes are left out: the state says which knobs act now
-                    _, name, value, low, high, default, unit, _, what = line.split(maxsplit=8)
+                    _, name, value, low, high, default, unit, what = line.split(maxsplit=7)
                     knobs[name] = Knob(name, value, low, high, default, unit.strip('-'), what.strip(),
                                        '.' not in default, self.send)
                 sock.settimeout(None)
@@ -247,13 +221,18 @@ class Mind:
         if keep and knob.name != 'playing':   # a tune never starts by itself
             self._saved('knobs')[knob.name] = knob.value
             self._save()
-            if knob.name == 'chart' and knob.value and 'metronome' in self.knobs:
+            if knob.name == 'chart' and 'metronome' in self.knobs:
                 self.knobs['metronome'].set(1)   # a chart starts with its click: the knob says so, and turns it off
 
     def transport(self):
-        """Plays the tune chosen, or stops it."""
-        if 'playing' in self.knobs and self.knobs['chart'].value:
+        """Plays the tune, or stops it."""
+        if 'playing' in self.knobs:
             self.knobs['playing'].set(1 - self.knobs['playing'].value)
+
+    def click(self):
+        """Turns the metronome on, or off."""
+        if 'metronome' in self.knobs:
+            self.knobs['metronome'].set(1 - self.knobs['metronome'].value)
 
     def _macro(self, macro):
         for name, anchors in self.turns[macro.name].items():
@@ -261,30 +240,6 @@ class Mind:
                 self.knobs[name].set(along(anchors, macro.value))
         self._saved('macros')[macro.name] = macro.value
         self._save()
-
-    def presets(self):
-        """(name, what, its musical controls, its knobs) of each preset, every control and knob it sets filled in: a
-        knob it leaves out stands where its control puts it, or at its default."""
-        presets = []
-        for name, what, macros, turns in PRESETS:
-            macros = {m.name: macros.get(m.name, 0.5) for m in self.macros}
-            free = {n: along(anchors, macros[m]) for m, knobs in self.turns.items() for n, anchors in knobs.items()}
-            presets.append((name, what, macros, {n: turns.get(n, free.get(n, self.knobs[n].default))
-                                                 for n in PRESET_KNOBS if n in self.knobs}))
-        return presets
-
-    def play(self, preset):
-        _, _, macros, turns = preset
-        for macro in self.macros:
-            macro.set(macros[macro.name])
-        for name, value in turns.items():
-            self.knobs[name].set(value)
-
-    def playing(self, preset):
-        """Whether every control and knob stands where `preset` sets them."""
-        _, _, macros, turns = preset
-        return (all(abs(m.value - macros[m.name]) < 0.01 for m in self.macros) and
-                all(abs(self.knobs[n].value - v) < 0.01 for n, v in turns.items()))
 
     def _saved(self, what):
         """What you left turned: 'knobs' or 'macros'."""
@@ -295,20 +250,13 @@ class Mind:
         with open(self.path, 'w') as f:
             json.dump(self.saved, f, indent=1)
 
-    def active(self, knob):
-        """Whether `knob` acts now, as the server says: a musical control does when any of its knobs does."""
-        if self.state is None:
-            return True
-        names = self.turns[knob.name] if knob.unit == 'macro' else {knob.name}
-        return bool(set(names) & set(self.state['active']))
-
     def readout(self):
-        """What it hears, for the top of the piano roll: (what, as it stands) for your key, your chord and your tempo,
-        over a Tune its title and bar for the key; None while it is not connected."""
+        """Where the tune is, for the top of the piano roll: (what, as it stands) for its title and bar, its chord
+        and the next, and its tempo; None while it is not connected."""
         if self.state is None:
             return None
         state = self.state
-        return [('Key', state['key'] or '—'), ('Chord', state['chord'] or '—'),
+        return [('Tune', state['key'] or '—'), ('Chord', state['chord'] or '—'),
                 ('Tempo', f"{state['bpm']} bpm" if state['bpm'] else '—')]
 
 
@@ -336,7 +284,7 @@ class Panel:
                                                          {k.name: k for k in yours}) +
                                             self._groups([('Its piano', ('instrument',)), *SOUND_GROUPS],
                                                          {k.name: k for k in its})),
-                     ('Advanced', AI, lambda: self._groups(ADVANCED, self._acting()))]
+                     ('Advanced', AI, lambda: self._groups(ADVANCED, self.mind.knobs))]
         self.tab, self.advanced = 0, False
         self.scroll = [0] * len(self.tabs)
         self.held = None          # (knob, x where the drag started, value then, pixels across its range)
@@ -348,29 +296,19 @@ class Panel:
 
     # what each tab holds
 
-    def _acting(self):
-        """The model's knobs that act now: the others are not shown."""
-        return {name: knob for name, knob in self.mind.knobs.items() if self.mind.active(knob)}
-
     def _play_sections(self):
-        knobs = self._acting()
+        knobs = self.mind.knobs
         if not knobs:
             return None
-        if 'part' in knobs:   # over a Tune
-            part = knobs['part']
-            cards = ('Part', [(name, what, part.value == value, lambda value=value: part.set(value))
-                              for name, value, what in PARTS])
-        else:
-            cards = ('Presets', [(preset[0], preset[1], self.mind.playing(preset),
-                                  lambda preset=preset: self.mind.play(preset)) for preset in self.mind.presets()])
-        sections = [('', [knobs['chart']])]
-        if 'playing' in knobs:   # a tune chosen: Play or Stop under it
-            playing = knobs['playing'].value
-            sections.append(('', [('Stop' if playing else 'Play', 'Space bar: the tune from a bar of count-in, or stop it',
-                                   bool(playing), self.mind.transport)]))
-        return sections + [cards,
-                ('Character', [macro for macro in self.mind.macros if self.mind.active(macro)]),
-                ('Octaves', [knobs[n] for n in ('lowest', 'highest') if n in knobs])]
+        part, playing, click = knobs['part'], knobs['playing'].value, knobs['metronome'].value
+        return [('', [knobs['chart']]),
+                ('', [('Stop' if playing else 'Play', 'Space bar: the tune from a bar of count-in, or stop it',
+                       bool(playing), self.mind.transport),
+                      ('Metronome', 'A click on each beat while the tune plays', bool(click), self.mind.click)]),
+                ('Part', [(name, what, part.value == value, lambda value=value: part.set(value))
+                          for name, value, what in PARTS]),
+                ('Character', self.mind.macros),
+                ('Octaves', [knobs['lowest'], knobs['highest']])]
 
     def _groups(self, groups, knobs):
         if not knobs:
@@ -381,7 +319,7 @@ class Panel:
         return [(title, ks) for title, ks in sections if ks]
 
     def _rows(self, sections):
-        """(kind, what, height) of each row of the tab: a section's title, the presets, a slider or steppers side by
+        """(kind, what, height) of each row of the tab: a section's title, cards, a slider or steppers side by
         side."""
         rows = []
         for title, knobs in sections:
@@ -649,7 +587,7 @@ class Panel:
 
 def stepped(knob):
     """Whether `knob` takes a few values, one by one: a stepper rather than a slider."""
-    return knob.unit in ('program', 'notes', 'hands', 'bpm', 'octave_from', 'octave_to') or \
+    return knob.unit in ('program', 'notes', 'bpm', 'octave_from', 'octave_to') or \
         knob.unit.startswith('choice:')
 
 

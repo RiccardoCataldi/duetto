@@ -6,30 +6,30 @@ Serve the duo over TCP so the model can run on another machine (e.g. one with a 
 
 One line per message, times in seconds since the connection opened:
     client -> server   "hello"                           the duo begins (any first line does; without it, at your
-                                                         first key)
+                                                         first key): its tune waits for Play
     client -> server   "on <onset> <duration> <pitch> <velocity>"   you pressed a key (the duration is a guess)
     client -> server   "off <onset> <pitch> <duration>"  the key you pressed at <onset> stopped sounding (pedal and all)
-    server -> client   "note <onset> <duration> <pitch> <hand>"   the model's next note, of its left or right hand,
-                                                      or of its walking bass over a tune (bass: one note at a time,
-                                                      as long as written); how hard is left to the client
+    server -> client   "note <onset> <duration> <pitch> <hand>"   the model's next note, of its right hand or of
+                                                      its walking bass (bass: one note at a time, as long as
+                                                      written); how hard is left to the client
     server -> client   "cut <onset>"                     forget the model's notes from <onset> on: they are resampled
-    server -> client   "tempo <bpm> <metronome> <bar>"   the tempo it keeps to (0: yours), a bar's first beat at <bar>
+    server -> client   "tempo <bpm> <metronome> <bar>"   the tempo it keeps to, a bar's first beat at <bar>
                                                          and a beat every 60 / bpm from it, and whether to click
                                                          them (1); at once and whenever turned
 One duo at a time; a second connection waits for the first to close.
 
 A connection that starts with "knobs" turns the duo's knobs (duo.KNOBS) instead, while a duo plays or before:
-    server -> client   "knob <name> <value> <lowest> <highest> <default> <unit> <modes> <what it does>"   one per knob
-                                                         (<modes>: free, tune or free/tune, where it acts), then "ready"
+    server -> client   "knob <name> <value> <lowest> <highest> <default> <unit> <what it does>"   one per knob,
+                                                         then "ready"
     client -> server   "set <name> <value>"              from the model's next note on, and for the next duos
-    server -> client   "state <json>"                    four times a second: DuoSession.state(), what it hears and does
+    server -> client   "state <json>"                    four times a second: DuoSession.state(), what it does and
+                                                         where the tune is
 """
 
 import argparse
 import itertools
 import json
 import math
-import os
 import queue
 import socketserver
 import statistics
@@ -50,24 +50,22 @@ def ms(seconds):
     return f"{statistics.median(ordered) * 1000:.0f} ms (95% within {worst * 1000:.0f} ms)"
 
 
-def amt(model=None, left=None, corpus=None):
+def amt(model=None, left=None):
     """The duo with the Anticipatory Music Transformer (duo.py)."""
     from music_transformer import duo
     from music_transformer.amt import AMTGenerator
-    from music_transformer.memory import midi_files
     generator = AMTGenerator(model_name=model)
     hands = {} if left is None else {'left': left}
-    corpus = midi_files(corpus) if corpus and os.path.isdir(corpus) else []
-    print(f"AMT model loaded on {generator.device}, {len(corpus)} MIDI files in its memory")
+    print(f"AMT model loaded on {generator.device}")
 
     def session(**knobs):
-        return duo.DuoSession(generator.model, generator.device, corpus=corpus, **hands, **knobs)
+        return duo.DuoSession(generator.model, generator.device, **hands, **knobs)
 
     return SimpleNamespace(engine=duo, session=session)
 
 
 def make_handler(player):
-    """`player`: its `engine` module (KNOBS, MODES, acting, knob, LOOKAHEAD, MARGIN) and `session(started, **knobs)`."""
+    """`player`: its `engine` module (KNOBS, knob, LOOKAHEAD, MARGIN) and `session(started, **knobs)`."""
     engine = player.engine
     KNOBS, LOOKAHEAD, knob = engine.KNOBS, engine.LOOKAHEAD, engine.knob
     lock = threading.Lock()
@@ -88,7 +86,7 @@ def make_handler(player):
         def turn(self):
             for name, (_, low, high, unit, what) in KNOBS.items():
                 self.wfile.write(f"knob {name} {knobs[name]} {low} {high} {KNOBS[name][0]} {unit or '-'} "
-                                 f"{'/'.join(engine.MODES[name])} {what}\n".encode())
+                                 f"{what}\n".encode())
             self.wfile.write(b"ready\n")
             threading.Thread(target=self.report, daemon=True).start()
             try:
@@ -108,9 +106,8 @@ def make_handler(player):
         def report(self):
             while True:
                 try:
-                    # with no duo yet, the knobs as last turned say its Mode
                     state = playing[0][0].state() if playing else {
-                        **engine.acting(knobs), 'doing': 'listening', 'key': None, 'chord': None, 'bpm': None}
+                        'doing': 'listening', 'key': None, 'chord': None, 'bpm': None}
                 except Exception:          # the duo moved on while we read it; the next report will do
                     state = None
                 try:
@@ -127,7 +124,7 @@ def make_handler(player):
                 threading.Thread(target=self.read, args=(inbox, first), daemon=True).start()
                 knobs['playing'] = 0   # a tune waits for Play, whatever the duo before left
                 session = player.session(started=opened, **knobs)
-                heard, played, shown = 0, 0, None
+                heard, played = 0, 0
                 sampling, answers, since = [], [], None   # seconds to sample each note; from your note to its next
                 playing.append((session, inbox))
                 inbox.put(('tempo',))
@@ -145,24 +142,16 @@ def make_handler(player):
                         if note is None:
                             break
                         if note and note[0] == 'tempo':
-                            # it clicks while a tune plays, or, free, once the duo has begun
-                            clicks = session.metronome and (session.playing if session.chart else session.base is not None)
+                            clicks = session.metronome and session.playing   # it clicks while the tune plays
                             self.wfile.write(f"tempo {session.pace} {int(clicks)} {session.began:.3f}\n".encode())
-                            if session.chart and not session.playing:   # stopped: what it has not sounded goes
+                            if not session.playing:   # stopped: what it has not sounded goes
                                 self.wfile.write(f"cut {time.monotonic() - opened:.3f}\n".encode())
                         elif note and note[0] == 'off':
                             session.release(*note[1:])
                         elif note:
                             heard += 1
-                            if heard == 1:
-                                inbox.put(('tempo',))   # free, its click starts with your first note
                             since = since or time.perf_counter()
                             cut = session.hear(*note[1:])
-                            key = session.listener.said_key()
-                            if key != shown and key is not None:
-                                shown = key
-                                sure = session.listener.belief[key]
-                                print(f"duo: {note[1]:.1f}s you are in {session.listener.name(key)} ({sure:.0%})")
                             if cut is not None:
                                 self.wfile.write(f"cut {cut:.3f}\n".encode())
                         elif session.base is not None and session.ahead() < LOOKAHEAD:
@@ -214,9 +203,8 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--model', default=None, help='Hugging Face name or local path of the AMT model')
     parser.add_argument('--left', type=int, default=None,
-                        help='the General MIDI program its left hand is in the context (default: duo.LEFT, a bass)')
-    parser.add_argument('--corpus', default=None, help='a folder of MIDI files it remembers: your saved duos')
+                        help='the General MIDI program its bass is in the context (default: duo.LEFT, a bass)')
     args = parser.parse_args()
-    player = amt(args.model, args.left, args.corpus)
+    player = amt(args.model, args.left)
     print(f"listening on {args.host}:{args.port}")
     Server((args.host, args.port), make_handler(player)).serve_forever()

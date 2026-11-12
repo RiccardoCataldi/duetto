@@ -118,7 +118,7 @@ class Roll:
             self.fade.fill((*BACKGROUND[0], alpha), pygame.Rect(0, y, width, 1))
         self.glow = {c: glow_sprite(colour) for c, (_, _, colour) in PLAYERS.items()}
         self.instruments = {}     # channel -> the instrument it plays, if not PLAYERS'
-        self.readout = None       # what the model hears, shown at the top: (what, as it stands)
+        self.readout = None       # where the tune is, shown at the top: (what, as it stands)
         self.chart = None         # the tune it plays over: {'title', 'bars': [[chord, ...], ...], 'bar', 'beat'}
         self.offline = None       # or why it cannot say
         self.hint = None          # a key to press, in the corner

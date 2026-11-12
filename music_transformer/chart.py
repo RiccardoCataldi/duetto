@@ -1,5 +1,6 @@
 """
 A chart, as in a Real Book: the chords of a tune bar by bar, in 4/4, for the duo to play over with a metronome.
+The duo always plays over one: the first, until another is chosen.
 A file in charts/ is a few `name: value` lines (title, key as "G minor", bpm, feel: straight for even eighths
 instead of swung ones, bass: bossa for a bossa's bass instead of a walking one) and then the bars, between `|`: one or
 more chords each, sharing the bar equally; `%` is the bar before again. Chords are spelt as in a Real Book or
@@ -75,8 +76,8 @@ class Chart:
 
 CHANGES = 1.5   # over a chart it leans on the chord of the bar this much at least: it plays the changes
 # the knob of a session that follows charts: its `chart`, `bpm`, `metronome`, `clock`, `started` and `listener`
-KNOB = lambda: (0, 0, len(CHARTS), 'choice:' + '/'.join(['off', *(chart.name for chart in CHARTS)]),
-                "a tune it plays over with you, bar by bar from the next bar on, at its tempo unless you fix one")
+KNOB = lambda: (1, 1, len(CHARTS), 'choice:' + '/'.join(chart.name for chart in CHARTS),
+                "the tune it plays over with you, bar by bar from the next bar on, at its tempo unless you fix one")
 
 
 def bar_at(session, seconds):
@@ -125,40 +126,37 @@ def feel(session, seconds):
 
 
 def follow(session, restart=True):
-    """The session's chart or bpm knob was turned. With a chart it keeps to `pace`: the tempo you fix, or the
+    """The session's chart or bpm knob was turned, or Play pressed. It keeps to `pace`: the tempo you fix, or the
     chart's; the chart begins at `began`, after COUNT bars of count-in from the next bar, or, when only the tempo
-    changed (`restart` False), it carries on from where it is. Without one: your chord and key again, at the tempo you fix or yours."""
+    changed (`restart` False), it carries on from where it is."""
     now, before = session.clock() - session.started, getattr(session, 'pace', 0)
     beats = max(now - getattr(session, 'began', 0.0), 0) * before / 60   # played so far
-    session.listener.chart, session.began, session.pace = None, 0.0, session.bpm
     session.varied = getattr(session, 'varied', random.randrange(10 ** 6))   # its ways differ from one duo to the next
-    if session.chart:
-        tune = CHARTS[session.chart - 1]
-        session.pace = session.bpm or tune.bpm
-        bar = BEATS * 60 / session.pace
-        session.began = now - beats * 60 / session.pace if before and not restart else (-(-now // bar) + COUNT) * bar
-        session.listener.chart = (lambda at: bar_at(session, at)[1][:2], tune.key)
-    session.listener.fix(session.pace, session.began)
+    tune = CHARTS[session.chart - 1]
+    session.pace = session.bpm or tune.bpm
+    bar = BEATS * 60 / session.pace
+    session.began = now - beats * 60 / session.pace if before and not restart else (-(-now // bar) + COUNT) * bar
+    session.listener.chart = (lambda at: bar_at(session, at)[1][:2], tune.key)
+    session.listener.fix(session.pace)
 
 
 def reading(session, state):
-    """`state` with the chart in the place of your key and chord: its title and bar, its chord and the next."""
-    if session.chart:
-        tune, now = CHARTS[session.chart - 1], session.clock() - session.started
-        bar, here = bar_at(session, now)
-        state['key'] = f"{tune.title} {bar + 1}/{len(tune.bars)}"
-        state['chord'] = f"{here[2]} > {bar_at(session, now + BEATS * 60 / session.pace)[1][2]}"
-        state['bpm'] = session.pace
-        state['chart'] = {'title': tune.title, 'bars': [[name for *_, name in chords] for chords in tune.bars],
-                          'bar': bar, 'beat': int(max(now - session.began, 0) * session.pace / 60 % BEATS)}
-        quoting = getattr(session, 'quoting', None)
-        if quoting and now < quoting[1]:   # whose phrase it is playing
-            state['chart']['quote'] = quoting[0]
-        if not session.playing:   # stopped: its page, no bar lit
-            state['key'], state['chord'], state['chart']['bar'] = tune.title, None, -1
-        elif now < session.began:   # the count-in: no bar yet, and the beats still to go
-            left = int((session.began - now) * session.pace / 60) + 1
-            state['key'], state['chart']['bar'], state['chart']['count'] = f"{tune.title} in {left}", -1, left
+    """`state` with where the tune is: its title and bar for the key, its chord and the next, its tempo, its page."""
+    tune, now = CHARTS[session.chart - 1], session.clock() - session.started
+    bar, here = bar_at(session, now)
+    state['key'] = f"{tune.title} {bar + 1}/{len(tune.bars)}"
+    state['chord'] = f"{here[2]} > {bar_at(session, now + BEATS * 60 / session.pace)[1][2]}"
+    state['bpm'] = session.pace
+    state['chart'] = {'title': tune.title, 'bars': [[name for *_, name in chords] for chords in tune.bars],
+                      'bar': bar, 'beat': int(max(now - session.began, 0) * session.pace / 60 % BEATS)}
+    quoting = getattr(session, 'quoting', None)
+    if quoting and now < quoting[1]:   # whose phrase it is playing
+        state['chart']['quote'] = quoting[0]
+    if not session.playing:   # stopped: its page, no bar lit
+        state['key'], state['chord'], state['chart']['bar'] = tune.title, None, -1
+    elif now < session.began:   # the count-in: no bar yet, and the beats still to go
+        left = int((session.began - now) * session.pace / 60) + 1
+        state['key'], state['chart']['bar'], state['chart']['count'] = f"{tune.title} in {left}", -1, left
     return state
 
 

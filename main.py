@@ -37,7 +37,7 @@ TOP, INNER = 1.08, 0.82  # in a chord the top voice sings and the inner voices f
 CONTOUR = 0.2            # its line swells as it rises and falls back as it descends: this much from lowest to highest
 CONTOUR_NOTES = 16       # its last notes the contour is measured against
 HUMAN = 4                # velocity a little different every time, as a hand never strikes twice the same
-# the metronome of a tempo you fix (the bpm and metronome knobs): General MIDI percussion, a bar of BAR beats
+# the metronome of the tune (the bpm and metronome knobs): General MIDI percussion, a bar of BAR beats
 DRUMS = 9
 CLICK = (76, 77)         # hi wood block on the first beat of a bar, low wood block on the others
 CLICK_VELOCITY = 70
@@ -86,7 +86,7 @@ class Duo:
         self.bass = None               # the pitch its walking bass sounds: one at a time
         self.line = deque(maxlen=CONTOUR_NOTES)   # its right hand's last pitches
         self.late = 0                  # the model's notes that came later than LATE_S, skipped
-        self.bpm, self.metronome = 0, False   # the tempo the model keeps to (0: yours) and whether we click it
+        self.bpm, self.metronome = 0, False   # the tempo the model keeps to and whether we click it
         self.click_at = None           # when the metronome's next beat falls
         self.bar_at = started          # when a bar of the metronome begins: its beats are counted from there
 

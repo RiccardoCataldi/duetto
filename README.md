@@ -4,7 +4,7 @@
 
 ![You in orange, the model in blue, on the piano roll](samples/duo/duetto.gif)
 
-Play a MIDI keyboard and a transformer plays a second piano with you, in real time. It listens like a partner (your key, your chord, your pulse, your phrases), comps while you play and takes the melody when you rest. Or pick a tune from a Real Book and it plays it with you: walking bass, comping, solos.
+Play a MIDI keyboard and a transformer plays a second piano with you, in real time. Pick a tune from a Real Book and it plays it with you: walking bass, comping, solos. It listens like a partner: it comps while you play, solos when you rest, answers your phrases and quotes them back.
 
 ▶ **[Watch a full improvisation on YouTube](https://www.youtube.com/watch?v=0qvRMhN8qa4)**
 
@@ -24,11 +24,9 @@ It copies the model's code to the GPU host, starts the server there, an SSH tunn
 
 No MIDI keyboard? The laptop's keys play, as in Ableton Live: `A W S E D F T G Y H U J K O L P` from C, `Z`/`X` octave down/up, `C`/`V` softer/louder.
 
-## Two Modes
+## Playing a tune
 
-**Free**: no tune. It starts at your first note and follows you. Pick a **Preset** (duet, call & response, it comps, it solos, free) and shape it with the **Character**. It remembers what you played, in this duo and in your saved ones, in the manner of [Somax2](https://github.com/DYCI2/Somax2), and plays it back as much as *memory* says.
-
-**Tune**: pick a tune in **Play** and its page appears. **Play** (or the space bar) counts it in, **Stop** silences it; it never starts by itself. Choose its **Part**:
+Pick a tune in **Play** and its page appears. **Play** (or the space bar) counts it in, **Stop** silences it; it never starts by itself. The **Metronome** is beside it. Choose its **Part**:
 
 | Part | It plays |
 | --- | --- |
@@ -37,7 +35,7 @@ No MIDI keyboard? The laptop's keys play, as in Ableton Live: `A W S E D F T G Y
 | **Duet** | comps while you play, solos when you rest |
 | **Trade fours** | four bars yours, four bars its own |
 
-Over a tune it also quotes **you**: each phrase you play is filed under its chords and comes back wherever those chords return, in any key (*memory*: how often; *dialogue*: how much it prefers your last one). Hold a chord that is not the tune's and it follows your reharmonisation (*key follow*: how soon).
+It also quotes **you**: each phrase you play is filed under its chords and comes back wherever those chords return, in any key (*memory*: how often; *dialogue*: how much it prefers your last one). Between two phrases it quotes it may add a pickup into the next (the `pickup` knob). Hold a chord that is not the tune's and it follows your reharmonisation (*key follow*: how soon).
 
 ## The controls
 
@@ -45,11 +43,11 @@ Over a tune it also quotes **you**: each phrase you play is filed under its chor
 
 | Tab | What is there |
 | --- | --- |
-| **Play** | the Tune and Play/Stop; the Presets (Free) or the Part (Tune); the Character; the octaves |
+| **Play** | the Tune, Play/Stop and the Metronome; the Part; the Character; the octaves |
 | **Sound** | both pianos in FluidSynth: instrument, volume, pan, envelope, reverb, delay |
-| **Advanced** (F2) | every knob of the model that acts now (`KNOBS` in [duo.py](music_transformer/duo.py)) |
+| **Advanced** (F2) | every knob of the model (`KNOBS` in [duo.py](music_transformer/duo.py)) |
 
-The **Character** is nine controls, one position for both Modes: density, harmony, role, dialogue, groove, risk, focus, memory, key follow. Only the controls that act in the current Mode are shown; hover one to read what it does.
+The **Character** is nine controls: density, harmony, role, dialogue, groove, risk, focus, memory, key follow. Hover one to read what it does.
 
 Keys: `Space` play/stop the tune, `F` (or `F11`) fullscreen, `K` (or `Tab`) hide the panel, `F2` Advanced, `Esc` quit.
 
@@ -68,7 +66,7 @@ Eighths are swung unless the chart says `feel: straight`.
 
 ## How it works
 
-![How duetto works, in five levels: overview, where it runs, inside the GPU host, who decides each note, the Memory](docs/diagrams/duetto.svg)
+![How duetto works, in four levels: overview, where it runs, inside the GPU host, who decides each note](docs/diagrams/duetto.svg)
 
 The diagram's source is [docs/diagrams/duetto.excalidraw](docs/diagrams/duetto.excalidraw): open it in [Excalidraw](https://excalidraw.com) or VS Code's Excalidraw extension.
 

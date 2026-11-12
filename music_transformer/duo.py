@@ -1,7 +1,7 @@
 """
-A real-time duo with the Anticipatory Music Transformer: you play one instrument, the model improvises on another
-at the same time. Your notes enter the context the moment you press them; the part of the model's line that has
-not sounded yet is thrown away and sampled again, now hearing you.
+A real-time duo with the Anticipatory Music Transformer over a tune: you play one piano, the model another at the
+same time, over the chords of a chart (chart.py). Your notes enter the context the moment you press them; the part
+of the model's line that has not sounded yet is thrown away and sampled again, now hearing you.
 
 Times on the wire are seconds since the connection opened; inside the context they are ticks since `base`.
 """
@@ -17,10 +17,8 @@ from anticipation.vocab import AUTOREGRESS, DUR_OFFSET, NOTE_OFFSET, TIME_OFFSET
 from anticipation.sample import safe_logits, nucleus
 
 from music_transformer import bebop, chart, licks
-from music_transformer.listener import BASS_TOP, CHART_FORCE, ROOT
-from music_transformer.listener import FORCED, NAMES, STAY, Listener, hands
+from music_transformer.listener import BASS_TOP, CHART_FORCE, ROOT, STAY, Listener, hands
 from music_transformer.listener import PHRASE as REST   # beats of rest that end your phrase
-from music_transformer.memory import Memory
 
 LOOKAHEAD = 100   # ticks the model plays ahead of now (1 s)
 MARGIN = 15       # ticks: a new note of the model sounds no earlier than this, to cover sampling and the network
@@ -29,41 +27,29 @@ LONGEST_REST = 800   # ticks: the most the max_rest knob allows
 # it breathes: silence is something it does, not a long gap it happens to sample
 PHRASE = 16       # notes it plays, about, before it takes a breath
 BREATH = 150      # ticks of silence that end a phrase
-TIMEOUT = 1000    # ticks it plays on after your last note; then it is silent until you play
-NEVER = 6000      # a timeout this long: it plays on for good
-SILENCE = 0.1     # chance that it leaves out a slice of its memory and stays silent as long as the slice lasts
-EXACT = 10.0      # recall at this strength: it plays what it remembers note for note
+EXACT = 10.0      # recall at this strength: every phrase it quotes is yours, once you have played over the chords
 COMMIT = 50       # ticks ahead of now its plan stands when you play, as long as your note does not contradict it
 # left free, the model plays like a full Lakh MIDI track: dense chords and the same arpeggio over and over.
-# These keep it a pianist: it comps in chords while you play and plays lines when you rest.
-CHORD = 3         # most notes its right hand may start at once while you play
-SOLO_CHORD = 2    # and when you rest
+# These keep it a pianist
+CHORD = 3         # most notes of a chord it comps
 MIN_STEP = 20     # ticks between two of its onsets that are not a chord
 NO_REPEAT = 3     # it may not play again a run of this many pitches it played in its last LINE notes
 LINE = 32
 # it listens to you more than to itself:
 SELF_WINDOW = 200 # ticks of its own playing it remembers; all of yours within WINDOW stays
-SPACE = 50        # ticks between its onsets while you are playing: it leaves you room
 PLAYING = 100     # ticks after your last note that you still count as playing
-# it listens like a partner (listener.py): your key, your chord, your pulse, your phrases.
-CHORD_TONE = 1.0  # logit added to the tones of the chord you are playing
+# it listens like a partner (listener.py): the chord you hold, your hands, your phrases.
+CHORD_TONE = 1.0  # logit added to the tones of the chord of the bar
 TENSION = 1.0     # logit added to the tensions of that chord (its 9th, 11th or #11th, 13th), as a jazz pianist colours it
-OUT_OF_KEY = 2.0  # logit taken from a pitch class outside your key; in between while you are modulating
+OUT_OF_KEY = 2.0  # how firmly it keeps to the scale of the bar's chord (listener.bias)
 ANSWER = 400      # ticks after your phrase ends in which it answers it, following its intervals
 ECHO = 3.0        # logit added to the pitch that continues your phrase's intervals, over and over as a sequence
 RUN = MAX_REST    # ticks: the longest silence it may leave while it answers; low, it answers in a run of notes
-GRID = 2          # ticks off your pulse that its onsets may land (your beat while you play, your tatum otherwise)
+GRID = 2          # ticks off the beat's divisions that its onsets may land
 WINDOW = 2000     # ticks of the duo the model keeps hearing when the context fills up or the clock runs out
 KEEP = 600        # tokens kept at most in that case
 PRUNE = 6         # its notes past SELF_WINDOW wait to be this many: forgetting them feeds the whole context again
-# two hands, as a pianist plays: its line over a left hand of its own, another instrument in the context so that
-# the model hears them as two parts. Each hand keeps to its register and its own rhythm; both sound as the model.
-HANDS = 2
-LEFT = 32         # the General MIDI program the left hand is in the context: Lakh MIDI's bass lines move like one
-LEFT_STEP = 40    # ticks between two of the left hand's onsets that are not a chord
-LEFT_CHORD = 3    # most notes the left hand may start at once
-LEFT_TOP = 64     # the highest pitch of the left hand (E4)
-RIGHT_BOTTOM = 53 # the lowest pitch of the right hand (F3), while there are two
+LEFT = 32         # the General MIDI program its bass is in the context: Lakh MIDI's bass lines move like one
 # where it plays against you, as a second pianist: clear of your hands while you play, up where a melody sings when
 # you rest
 APART = 2.0       # logit taken from the keys of your hands while you play, and from those over your melody
@@ -75,13 +61,13 @@ ROOM = 12         # free keys a hand of its needs to keep apart at full strength
 SPLIT = 60        # your notes from middle C up are your right hand's
 MELODY = (72, 79) # where its line sings when you rest: the middle of your right hand, from C5 to G5
 PITCHES = torch.arange(MAX_PITCH, dtype=torch.float)
-# soloing over a tune (chart.py), as a jazz player does
+# soloing over the tune, as a jazz player does
 APPROACH = 1.5    # logit taken from a key a semitone from a chord tone, off the beat: a chromatic approach, now and then
 RESOLVE = 6.0     # logit added to the chord tone it approached: the next note lands on it
 TARGET = 1.5      # logit added to the chord's tones on the beat
 STYLE = 1.5       # how much it takes its notes over each chord from bebop soloists' habits (bebop.py)
 LINE = 1.5        # and how its line moves from one note to the next
-SOLO = (60, 96)   # over a tune, where its line is when it solos: from middle C to C7
+SOLO = (60, 96)   # where its line is when it solos: from middle C to C7
 COMP = (53, 76)   # where its chords are when it comps: from F3 to E5
 BASS = (28, BASS_TOP - 1)   # and its walking bass: from E1
 UNDER = (52, 69)  # the chords it comps under its own solo: from E3 to A4, as a pianist's left hand
@@ -94,80 +80,45 @@ EARLY = 0.15      # beats before a bar line your phrase may begin and still begi
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does
 KNOBS = {
-    'min_step': (MIN_STEP, 5, 60, 'ticks', "time between its onsets when you rest"),
-    'space': (SPACE, 10, 150, 'ticks', "time between its onsets while you play"),
-    'out_of_key': (OUT_OF_KEY, 0.0, 6.0, '', "how strongly it keeps to your key, or over a tune to the scale of the bar's chord"),
-    'chord_tone': (CHORD_TONE, 0.0, 4.0, '', "how much it leans on the chord you play"),
-    'tension': (TENSION, 0.0, 4.0, '', "how much it colours your chord with its 9th, 11th and 13th"),
-    'chord': (CHORD, 1, 6, 'notes', "most notes it starts at once while you play: its comping"),
-    'solo_chord': (SOLO_CHORD, 1, 6, 'notes', "most notes it starts at once when you rest: lines"),
+    'min_step': (MIN_STEP, 5, 60, 'ticks', "the least time between its onsets"),
+    'out_of_key': (OUT_OF_KEY, 0.0, 6.0, '', "how strongly it keeps to the scale of the bar's chord"),
+    'chord_tone': (CHORD_TONE, 0.0, 4.0, '', "how much it leans on the chord of the bar"),
+    'tension': (TENSION, 0.0, 4.0, '', "how much it colours the chord with its 9th, 11th and 13th"),
+    'chord': (CHORD, 1, 6, 'notes', "most notes of a chord it comps (three at least)"),
     'apart': (APART, 0.0, 6.0, '', "how firmly it keeps apart from your hands, and under your melody, while you play"),
     'lead': (LEAD, 0.0, 6.0, '', "how firmly it takes the melody, up where yours was, when you rest"),
     'answer': (ANSWER, 0, 1000, 'ticks', "how long after your phrase it answers it"),
-    'echo': (ECHO, 0.0, 6.0, '', "how closely its answer follows your intervals; over a tune, also how often the "
-             "phrase of yours it quotes is your last"),
+    'echo': (ECHO, 0.0, 6.0, '', "how closely its answer follows your intervals, and how often the phrase of yours "
+             "it quotes is your last"),
     'run': (RUN, 5, LONGEST_REST, 'ticks', "the longest silence it may leave while it answers: low, it answers in a run"),
-    'grid': (GRID, 0, 20, 'ticks', "how far off your pulse its onsets may land"),
-    'stay': (STAY, 0.80, 0.995, '', "how sure it must be you modulated, or over a tune how long you must hold a chord of "
-             "your own before it follows it (lower = sooner)"),
+    'grid': (GRID, 0, 20, 'ticks', "how far off the beat's divisions its onsets may land"),
+    'stay': (STAY, 0.80, 0.995, '', "how long you must hold a chord of your own before it leaves the tune's for it "
+             "(lower = sooner)"),
     'no_repeat': (NO_REPEAT, 2, 8, 'notes', "the length of runs it may not repeat"),
     'phrase': (PHRASE, 2, 64, 'notes', "about how many notes it plays before it takes a breath"),
     'breath': (BREATH, 0, LONGEST_REST, 'ticks', "the silence that ends its phrase"),
-    'timeout': (TIMEOUT, 0, NEVER, 'ticks', "how long it plays on after your last note; at the top, for good"),
-    'recall': (4.0, 0.0, EXACT, '', "how closely it follows its memory of you; 0: it only invents, at the top: it quotes; "
-               "over a tune, how many of the phrases it quotes are yours"),
-    'silence': (SILENCE, 0.0, 0.9, '', "how often it leaves out what it remembers and stays silent instead"),
-    'sparse': (0, 0, 1, 'choice:off/on', "with nothing to remember: on, it keeps silent; off, it invents"),
-    'decay': (30.0, 5.0, 120.0, 's', "how long an idea of where you are lasts unheard"),
-    'least': (1.5, 0.5, 8.0, '', "how sure it must be of where you are before it follows its memory"),
-    'continuity': (1.5, 1.0, 4.0, '', "how much it prefers to carry on along what it is remembering"),
-    'jump': (8, 2, 32, 'slices', "how far along one memory it may go before it must jump"),
-    'melodic': (1.0, 0.0, 3.0, '', "how much your line wakes its memory"),
-    'harmonic': (1.0, 0.0, 3.0, '', "how much your harmony wakes its memory"),
-    'itself': (0.5, 0.0, 3.0, '', "how much its own line wakes its memory"),
-    'probabilistic': (0, 0, 1, 'choice:strongest/by_chance', "the memory it follows: always the strongest, or by chance"),
+    'recall': (4.0, 0.0, EXACT, '', "how many of the phrases it quotes are yours: 0, the great soloists' only; at the "
+               "top, yours wherever you played over the chords"),
     'commit': (COMMIT, MARGIN, LOOKAHEAD, 'ticks', "how far ahead its plan stands when you play: low, it rethinks at every note"),
     'self_window': (SELF_WINDOW, 50, 2000, 'ticks', "how much of its own playing it remembers"),
     'max_rest': (MAX_REST, 50, LONGEST_REST, 'ticks', "the longest silence it may leave"),
-    'hands': (HANDS, 1, 2, 'hands', "one hand, a single line; or two: its line over a left hand of its own"),
-    'left_step': (LEFT_STEP, 10, 200, 'ticks', "time between its left hand's onsets"),
     'temperature': (1.0, 0.5, 1.5, '', "how adventurous its choices are"),
     'top_p': (0.98, 0.80, 1.0, '', "how many unlikely notes it still considers"),
-    'lowest': (0, 0, 8, 'octave_from', "the lowest octave it may play"),
-    'highest': (8, 0, 8, 'octave_to', "the highest octave it may play"),
-    'root': (0, 0, 11, 'choice:' + '/'.join(NAMES), "the root of the scale you force it into"),
-    'scale': (0, 0, len(FORCED), 'choice:' + '/'.join(['yours', *FORCED]),
-              "the scale it keeps to: your key as it hears it, or one you force it into"),
-    'bpm': (0, 0, 240, 'bpm', "the tempo it keeps to, its beats on the metronome's: yours as it hears it, or one you fix"),
-    'metronome': (0, 0, 1, 'choice:off/on', "a click on each beat of the tempo you fix"),
+    'lowest': (0, 0, 8, 'octave_from', "the lowest octave its right hand may play"),
+    'highest': (8, 0, 8, 'octave_to', "the highest octave its right hand may play"),
+    'bpm': (0, 0, 240, 'bpm', "the tempo it keeps to: the tune's, or one you fix"),
+    'metronome': (0, 0, 1, 'choice:off/on', "a click on each beat while the tune plays"),
     'chart': chart.KNOB(),
     'playing': (0, 0, 1, 'choice:stopped/playing', "whether the tune plays: Play counts it in from the next bar, Stop "
                 "silences it; never kept, so a tune never starts by itself"),
-    'licks': (0.4, 0.0, 1.0, '', "over a tune, how much of its solo is phrases of the great soloists, or yours, note for note, "
+    'licks': (0.4, 0.0, 1.0, '', "how much of its solo is phrases of the great soloists, or yours, note for note, "
               "each over the chords it was played over: 0: none, its own lines only; at the top: one after another"),
     'pickup': (0.5, 0.0, 1.0, '', "how often, when one phrase it quotes follows another and there is room between "
                "them, it leads into the next: by step, with a chromatic approach off the beat, or enclosing its first note"),
-    'part': (1, 0, 3, 'choice:comps/duet/solos/trades', "over a tune: it comps, with a walking bass, for you to solo; "
+    'part': (1, 0, 3, 'choice:comps/duet/solos/trades', "it comps, with a walking bass, for you to solo; "
              "duet: it comps while you play and solos when you rest; it solos as a jazz player does, for you to comp; "
              "or you trade fours: four bars of your solo, then four of its own"),
 }
-RECALLED = ('decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic', 'itself', 'probabilistic')   # memory.py's
-# the Modes each knob acts in: these in the Free Mode only, these over a tune only, the others in both
-MODES = {**dict.fromkeys(KNOBS, ('free', 'tune')),
-         **dict.fromkeys(('space', 'solo_chord', 'timeout', 'silence', 'sparse', *RECALLED, 'hands', 'left_step', 'root',
-                          'scale'), ('free',)),
-         **dict.fromkeys(('licks', 'pickup', 'part', 'playing'), ('tune',))}
-
-
-def acting(knobs):
-    """{'mode', 'active'} with `knobs` as they stand: its Mode, over a tune once one is chosen and free otherwise;
-    and the knobs that act now, those of that Mode but the ones another knob leaves nothing to do."""
-    mode, idle = 'tune' if knobs['chart'] else 'free', set()
-    if mode == 'free':
-        idle = {'stay'} if knobs['scale'] else {'root'}   # forced: your key no longer counts
-        idle |= set() if knobs['bpm'] else {'metronome'}   # a tune has its tempo; free, only the one you fix
-        idle |= set() if knobs['hands'] == 2 else {'left_step'}
-    return {'mode': mode, 'active': sorted(n for n, modes in MODES.items() if mode in modes and n not in idle)}
 
 
 def knob(name, value):
@@ -178,99 +129,77 @@ def knob(name, value):
 
 
 class DuoSession:
-    def __init__(self, model, device, you=0, me=4, left=LEFT, clock=time.monotonic, started=None, corpus=(), **knobs):
+    def __init__(self, model, device, you=0, me=4, left=LEFT, clock=time.monotonic, started=None, **knobs):
         self.model, self.device = model, device
-        self.you, self.me, self.left = you, me, left   # General MIDI programs: piano; its right and left hands
+        self.you, self.me, self.left = you, me, left   # General MIDI programs: piano; its right hand and its bass
         self.comp = next(program for program in (1, 2, 5, 6) if program not in (you, me, left))   # and the hand
-                                                       # that comps under its solo over a tune: another piano
-        self.listener, self.mind = Listener(), Memory()
-        self.mind.load(corpus)
+                                                       # that comps under its solo: another piano
+        self.listener = Listener()
         for name, (default, *_) in KNOBS.items():
             setattr(self, name, default)
         self.clock, self.started = clock, clock() if started is None else started
-        self.turn(**{name: getattr(self, name) for name in RECALLED})
-        self.turn(**knobs)
+        self.turn(**{'chart': self.chart, **knobs})
         self.heard_at = None           # context time of your last note
         self.base = None               # session tick of time 0 in the context: your first note
         self.seq = [AUTOREGRESS]       # complete events in time order, yours and the model's
         self.past, self.fed = None, 0  # the KV cache covers seq[:fed]
         self.spoken = []               # session seconds of its last notes that were not cut
-        self.plan, self.loose = [], 0  # (seconds, pitch, duration) it remembers and has yet to play; ticks its first
-                                       # note may wait for your pulse: it has just jumped
-        self.cursor = 0.0              # session seconds of its next slice: a rest in its memory passes here
-        self.free, self.owed = True, False   # it invents, its memory silent; your note is still to be answered
-        self.quotes = {}                     # for each bar it has come to, the phrase it quotes there, [(seconds,
-                                             # pitch, duration), ...]: none when it plays its own
-        self.quoting = None                  # (whose it is, the seconds it ends at)
-        self.quoted = [0, 0]                 # the bars of its solo it has quoted, and all of them
-        self.yours = {}                      # your Licks, for this duo only: the phrases you played over each run of
-                                             # chords (licks.key_of), as licks.DATA's, your last one last
-        self.learned = -1.0                  # session seconds of your last note in a phrase that has ended
+        self.quotes = {}               # for each bar it has come to, the phrase it quotes there, [(seconds, pitch,
+                                       # duration), ...]: none when it plays its own
+        self.quoting = None            # (whose it is, the seconds it ends at)
+        self.quoted = [0, 0]           # the bars of its solo it has quoted, and all of them
+        self.yours = {}                # your Licks, for this duo only: the phrases you played over each run of
+                                       # chords (licks.key_of), as licks.DATA's, your last one last
+        self.learned = -1.0            # session seconds of your last note in a phrase that has ended
 
     def turn(self, **knobs):
         """Sets knobs (see KNOBS), kept within their range; they take effect from the model's next note."""
         for name, value in knobs.items():
             setattr(self, name, knob(name, value))
-        for name in RECALLED:
-            if name in knobs:
-                setattr(self.mind, name, getattr(self, name))
         if 'stay' in knobs:
             self.listener.stay(self.stay)
-        if 'root' in knobs or 'scale' in knobs:
-            self.listener.force(self.root, list(FORCED)[self.scale - 1] if self.scale else None)
         if 'bpm' in knobs or 'chart' in knobs or 'playing' in knobs:
             chart.follow(self, 'chart' in knobs or 'playing' in knobs)   # Play: a count-in from the next bar
             self.quotes, self.quoted = {}, [0, 0]   # the bars are others
         if 'playing' in knobs and not self.playing and getattr(self, 'base', None) is not None:   # Stop: what it has not sounded goes
             cut = self._seconds(self.now())
             self._unwind(self.now())
-            self.spoken, self.plan = [onset for onset in self.spoken if onset < cut], []
+            self.spoken = [onset for onset in self.spoken if onset < cut]
 
     def state(self):
-        """What it hears and what it is doing: {'mode': free or tune, 'doing', 'key', 'chord', 'bpm', 'active': the
-        knobs that act now}."""
-        if self.base is None or self.heard_at is None:
-            return chart.reading(self, {**acting(self.knobs()), 'doing': 'listening',
-                                        'key': self.listener.forced_name(), 'chord': None, 'bpm': self.bpm or None})
-        now = self.now()
-        at = self._seconds(now)
-        if now - self.heard_at < PLAYING:
-            doing = 'accompanying'
-        elif self._timed_out(now):
-            doing = 'listening'
-        elif now - self.heard_at < self.answer and len(self.listener.phrase(at)) > 1:
-            doing = 'answering'
-        else:
-            doing = 'alone'
-        key = self.listener.said_key()
-        chord = self.listener.chord(at)
-        pulse = self.listener.pulse(at)
-        if self.chart and self.part == 3:
-            doing = 'its turn' if self._solos(at, False) else 'your turn'
-        heard = self.listener.name(key) if key is not None else None
-        return chart.reading(self, {
-            **acting(self.knobs()), 'doing': doing, 'key': self.listener.forced_name() or heard,
-            'chord': self.listener.chord_label(at) if chord else None,
-            'bpm': round(60 / self.listener.beat(pulse[0])) if pulse else None})
+        """What it is doing and where the tune is: {'doing', 'key': the tune and its bar, 'chord': the bar's and
+        the next, 'bpm', 'chart'} (chart.reading)."""
+        doing = 'listening'
+        if self.base is not None and self.heard_at is not None:
+            now = self.now()
+            at = self._seconds(now)
+            if self.part == 3:
+                doing = 'its turn' if self._solos(at, False) else 'your turn'
+            elif now - self.heard_at < PLAYING:
+                doing = 'accompanying'
+            elif now - self.heard_at < self.answer and len(self.listener.phrase(at)) > 1:
+                doing = 'answering'
+            else:
+                doing = 'alone'
+        return chart.reading(self, {'doing': doing})
 
     def begin(self):
-        """Over a tune, when it comps or solos for you (not in a duet, where it follows you), it starts by itself as
-        the count-in ends: your first note is not what it waits for."""
-        if self.base is None and self.chart and self.playing and self.part != 1 and \
+        """When it comps or solos for you (not in a duet, where it follows you), it starts by itself as the
+        count-in ends: your first note is not what it waits for."""
+        if self.base is None and self.playing and self.part != 1 and \
                 self.clock() - self.started >= self.began - LOOKAHEAD / TIME_RESOLUTION:
             self.base = round((self.clock() - self.started) * TIME_RESOLUTION)
             self.heard_at = -10 ** 6   # you have not played: as if long ago
 
     def _solos(self, at, you_play):
-        """Whether it solos at session seconds `at` over a tune; otherwise it comps."""
-        if not self.chart:
-            return False
+        """Whether it solos at session seconds `at`; otherwise it comps."""
         if self.part == 3:   # trading fours: yours first, counted on through the choruses
             return int(chart.beats(self, at) // chart.BEATS) // 4 % 2 == 1
         return self.part == 2 or (self.part == 1 and not you_play)
 
     def octaves(self):
-        """The lowest and highest pitch it may play, from C of its lowest octave to B of its highest (C4 = 60)."""
+        """The lowest and highest pitch its right hand may play, from C of its lowest octave to B of its highest
+        (C4 = 60)."""
         low, high = sorted((self.lowest, self.highest))
         return 12 * (low + 1), min(12 * (high + 1) + 11, MAX_PITCH - 1)
 
@@ -282,28 +211,22 @@ class DuoSession:
 
     def ahead(self):
         """Ticks of music already sampled beyond now; the caller samples more while this is under LOOKAHEAD."""
-        if self.chart and not self.playing:   # a tune stopped: it waits for Play
+        if not self.playing:   # stopped: it waits for Play
             return LOOKAHEAD + 5
         # its bass walks on while its right hand breathes
-        now, last = self.now(), max(self._last_time(), 0 if self._walks() else self._breath(), self._tick(self.cursor))
-        return LOOKAHEAD + 5 if self._timed_out(max(last, now)) and not self.owed else last - now
+        return max(self._last_time(), 0 if self._walks() else self._breath()) - self.now()
 
     def hear(self, onset, duration, pitch, velocity=None):
         """Your note, pressed at `onset` (AMT does not hear how hard): the model hears it when you played it, before
         those of its notes already on their way that come after it. Returns the time from which the model's unplayed
         notes are dropped, or None."""
         self.listener.hear(onset, duration, pitch)
-        self.mind.hear(onset, pitch, duration, self._phase(onset))
         tick = round(onset * TIME_RESOLUTION)
         if self.base is None:
             self.base = tick
         self._fit()   # it may have kept silent for longer than a context lasts
-        waited = self.heard_at is None or not self.timeout or self._timed_out(max(self.now(), self._last_time()))
         self.heard_at = max(tick - self.base, 0)
         now, later, cut = self.now(), self._unwind(self.heard_at), None
-        self.owed = True
-        if waited:                     # the trigger: you are what it was waiting for
-            self.cursor = min(self.cursor, self._seconds(now + MARGIN))
         bias = self.listener.bias(self._seconds(now), self.chord_tone, self.tension, self.out_of_key) if later else None
         self.seq += [TIME_OFFSET + self.heard_at, DUR_OFFSET + _duration(duration),
                      NOTE_OFFSET + self.you * MAX_PITCH + pitch]
@@ -316,7 +239,6 @@ class DuoSession:
                 self.seq += event
         if cut is not None:
             self.spoken = [onset for onset in self.spoken if onset < cut]
-            self.plan, self.cursor = [], min(self.cursor, cut)
         # otherwise its own line, two or three times denser than yours, drowns you out
         events = self._events()
         kept = [e for e in events
@@ -329,7 +251,6 @@ class DuoSession:
         """Your note pressed at `onset` stopped sounding after `duration`, the pedal's ring and all: the model hears
         how long it really was from its next note on."""
         self.listener.release(onset, pitch, duration)
-        self.mind.release(onset, pitch, duration)
         if self.base is None:
             return
         time_ = TIME_OFFSET + max(round(onset * TIME_RESOLUTION) - self.base, 0)
@@ -342,30 +263,23 @@ class DuoSession:
 
     @torch.no_grad()
     def play(self):
-        """Samples the model's next note: (onset, duration, pitch, hand) in session seconds, hand 'left' or 'right',
-        or 'bass' for its walking bass over a tune; or None when it stays silent."""
+        """Samples the model's next note: (onset, duration, pitch, hand) in session seconds, hand 'right', or 'bass'
+        for its walking bass."""
         self._fit()
         now, last = self.now(), self._last_time()
         you_play = self.heard_at is not None and now - self.heard_at < PLAYING
-        self.owed = False
-        if not self.plan:
-            self._step(now, last, you_play)
-        if self.plan:
-            return self._remembered(now, last, you_play)
-        if not self.free:
-            return None
         answering = self.heard_at is not None and not you_play and now - self.heard_at < self.answer
         walks, breath = self._walks(), self._breath()
         after = last if walks else max(last, breath)   # its bass walks on while its right hand breathes
-        earliest = max(after, now + MARGIN, self._tick(self.began) if self.chart else 0)   # not in the count-in
+        earliest = max(after, now + MARGIN, self._tick(self.began))   # not in the count-in
         latest = min(max(earliest, after + (min(self.max_rest, self.run) if answering else self.max_rest)), MAX_TIME - 1)
-        # soloing over a tune, how it divides the beat for these two bars: eighths, or a run of triplets, sixteenths
+        # soloing, how it divides the beat for these two bars: eighths, or a run of triplets, sixteenths
         # or thirty-seconds with no more than two of them of silence, or out of time
         solos = self._solos(self._seconds(earliest), you_play)
         feel = chart.feel(self, self._seconds(earliest)) if solos else None
         unit = round(60 / self.pace / feel * TIME_RESOLUTION) if feel else None   # ticks
         # the next note of a phrase it quotes, as it was played: comping, one of yours only
-        quote = self._lick(earliest, solos) if self.chart else None
+        quote = self._lick(earliest, solos)
         if quote:
             feel = unit = None
         if feel and feel > 2:
@@ -427,8 +341,8 @@ class DuoSession:
             if slot == 0:
                 times = (right[3] if late else torch.stack([window for *_, window in hands]).max(0).values).to(mask.device)
                 mask[TIME_OFFSET:TIME_OFFSET + MAX_TIME] = times
-                mask = self._on_your_pulse(mask, earliest, int(torch.nonzero(torch.isfinite(times)).max()), you_play,
-                                           0 if quote else feel)
+                mask = self._on_the_beat(mask, earliest, int(torch.nonzero(torch.isfinite(times)).max()),
+                                         0 if quote else feel)
                 if comp and not late:   # its chord has its own place in the bar, whatever the line's rhythm
                     mask[TIME_OFFSET + stab[0]:TIME_OFFSET + stab[1] + 1] = 0
                 if due is not None and not late and torch.isfinite(left[3][due + self.grid]):   # so has its bass,
@@ -483,102 +397,34 @@ class DuoSession:
                     return max(tick, earliest), tick + self.grid
         return None
 
-    def _step(self, now, last, you_play):
-        """What its memory says comes next: its next slice into the plan, or a rest; `free` when it says nothing.
-        It turns to its memory at a share of its steps as large as recall is of EXACT, and invents at the others."""
-        self.free = True
-        # over a tune it plays the changes, not what it remembers of you, which was over other chords
-        if not self.recall or self.chart or (not self.sparse and random.random() >= self.recall / EXACT):
-            return
-        self.mind.update(self._seconds(now))
-        at = self._seconds(max(now + MARGIN, last, self._tick(self.cursor)))
-        event = self.mind.step(at, self._phase(at))
-        if self.sparse and (event is None or not event[2]):
-            self.free, self.cursor = False, self._seconds(now + LOOKAHEAD + 10)
-        if event is None or (self.sparse and not event[2]):
-            return
-        slice_, shift, _ = event
-        # a rest it remembers lasts no longer than one it would leave on its own
-        self.free, self.cursor = False, at + min(self.mind.duration(slice_), self.max_rest / TIME_RESOLUTION)
-        if random.random() < self.silence:
-            return
-        low, high = self.octaves()
-        notes = self.mind.notes(slice_, shift)[-((self.chord if you_play else self.solo_chord) + LEFT_CHORD * (self.hands == 2)):]
-        self.plan = [(at, min(max(p, low + (p - low) % 12), high - (high - p) % 12), d) for p, d in notes]
-        self.loose = 0 if self.mind.run else round(self.listener.beat(pulse[0]) * TIME_RESOLUTION) \
-            if (pulse := self.listener.pulse(at)) else 0
-
-    def _remembered(self, now, last, you_play):
-        """The next note of the plan: when its memory says and about what it says, as strictly as `recall`; AMT fills
-        in the rest, and may change a note unless recall is EXACT."""
-        at, pitch, duration = self.plan.pop(0)
-        tick = min(max(self._tick(at), last, now + MARGIN), MAX_TIME - 1)
-        end, self.loose = min(tick + self.loose, MAX_TIME - 1), 0
-        instrument = self.left if self.hands == 2 and pitch < RIGHT_BOTTOM else self.me
-        register, line = self.octaves(), self._my_line(instrument)
-        for slot in range(3):
-            logits = self._logits()
-            mask = torch.full_like(logits, -float('inf'))
-            if slot == 0:
-                mask[TIME_OFFSET + tick:TIME_OFFSET + end + 1] = 0
-                mask = self._on_your_pulse(mask, tick, end, you_play) if end > tick else mask
-            elif slot == 1:
-                length = _duration(duration)
-                mask[DUR_OFFSET + max(length // 2, 1):DUR_OFFSET + min(2 * length, MAX_DUR - 1) + 1] = 0
-            elif self.recall >= EXACT:
-                mask[NOTE_OFFSET + instrument * MAX_PITCH + pitch] = 0
-            else:
-                first = NOTE_OFFSET + instrument * MAX_PITCH
-                mask[first + register[0]:first + register[1] + 1] = 0
-                for note in self._banned(line, tick):
-                    mask[note] = -float('inf')
-                mask[first:first + MAX_PITCH] += self._partner(tick, line, register, instrument == self.me)
-                mask[first + pitch] += self.recall
-            token = int(torch.multinomial(torch.softmax(nucleus(logits + mask, self.top_p), -1), 1))
-            self.seq.append(token)
-        return self._played()
-
     def _played(self):
-        """The note just sampled, once it has joined what it has said and woken its memory of itself."""
+        """The note just sampled, once it has joined what it has said."""
         time_, duration, note = self.seq[-3:]
         onset, pitch = self._seconds(time_ - TIME_OFFSET), (note - NOTE_OFFSET) % MAX_PITCH
-        if not (self.chart and self._instrument(note) in (self.left, self.comp)):   # its walking bass and the chords
-                                                                                    # under its solo are no part of its phrases
+        if self._instrument(note) not in (self.left, self.comp):   # its walking bass and the chords under its solo
+                                                                   # are no part of its phrases
             self.spoken = self.spoken[-256:] + [onset]
-        self.cursor = max(self.cursor, onset)
-        if not self.chart:   # over a tune it does not recall: it plays the changes
-            self.mind.own(onset, pitch)
-        hand = 'right' if self._instrument(note) != self.left else 'bass' if self._walks() else 'left'
+        hand = 'bass' if self._instrument(note) == self.left else 'right'
         return onset, (duration - DUR_OFFSET) / TIME_RESOLUTION, pitch, hand
 
     def _tick(self, seconds):
         return round(seconds * TIME_RESOLUTION) - self.base
-
-    def _phase(self, seconds):
-        """Where `seconds` falls in your beat, 0 to 1; None while your rhythm is unclear."""
-        pulse = self.listener.pulse(seconds)
-        return ((seconds - pulse[1]) / self.listener.beat(pulse[0])) % 1 if pulse else None
-
-    def _timed_out(self, tick):
-        """Whether it has played on long enough, by `tick`, after your last note."""
-        return not self.chart and self.timeout < NEVER and tick - self.heard_at >= self.timeout   # a tune goes on
 
     def _breath(self):
         """The tick before which it keeps silent: a breath after its last note, once its phrase has run out of notes.
         Its phrase is its notes since its last silence of a breath; about `phrase` of them, a different number each.
         A phrase it quotes is played whole, as its soloist breathed: no breath of its own while one goes on, or
         where the next begins."""
-        if not self.spoken or not self.free:
+        if not self.spoken:
             return 0
         start, gap = len(self.spoken) - 1, self.breath / TIME_RESOLUTION
         while start > 0 and self.spoken[start] - self.spoken[start - 1] < gap:
             start -= 1
         notes = self.phrase * random.Random(self.spoken[start]).uniform(0.6, 1.4)
-        said = self.spoken[start:]
-        if len(set(said) if self.chart else said) < notes:   # over a tune a chord it comps is one
+        if len(set(self.spoken[start:])) < notes:   # a chord it comps is one
             return 0
         last = round(self.spoken[-1] * TIME_RESOLUTION) - self.base
-        if self.chart and self._solos(self._seconds(last), self.now() - self.heard_at < PLAYING):
+        if self._solos(self._seconds(last), self.now() - self.heard_at < PLAYING):
             bar, first = chart.BEATS * 60 / self.pace * TIME_RESOLUTION, self._tick(self.began)
             coming = round(first + max(math.ceil((last + 1 - first) / bar), 0) * bar)   # the next bar line
             if self._lick(last + 1) or (coming < last + self.breath and self._lick(coming)):
@@ -586,76 +432,60 @@ class DuoSession:
         return last + self.breath
 
     def _walks(self):
-        """Whether its left hand walks a bass over the tune: its part says so, whatever its `hands` (a preset for
-        playing without a tune may have left it one) or its octaves: unless it solos for you to comp."""
-        return bool(self.chart) and self.part != 2
+        """Whether its left hand walks a bass under the tune: always, unless it solos for you to comp."""
+        return self.part != 2
 
     def _hands(self, you_play, solos=False):
-        """(instrument, step, most notes at once, (lowest, highest) pitch) of each hand it plays with. Over a tune
-        its part says what they do, whatever the texture knobs: soloing (`solos`), a line of single notes from
-        middle C up; comping, chords in the middle of the keyboard; and under either, unless it solos for you to
-        comp, a walking bass: a note a beat."""
+        """(instrument, step, most notes at once, (lowest, highest) pitch) of each hand it plays with, as its part
+        says: soloing (`solos`), a line of single notes from middle C up; comping, chords in the middle of the
+        keyboard; and under either, unless it solos for you to comp, a walking bass: a note a beat."""
         low, high = self.octaves()
-        if self.chart:
-            within = lambda lowest, highest: (max(low, lowest), min(high, highest)) \
-                if max(low, lowest) <= min(high, highest) else (low, high)
-            right = (self.me, self.min_step, 1, within(SOLO[0], SOLO[1])) if solos else \
-                (self.me, self.min_step, max(self.chord, 3), within(COMP[0], COMP[1]))
-            beat = 60 / self.pace * TIME_RESOLUTION * (0.5 if self._bossa() else 1)   # the least between its notes
-            beat = max(round(beat) - self.grid - 1, 5)
-            return [right] + ([(self.left, beat, 1, BASS)] if self._walks() else [])   # its octaves bound its right hand only
-        right = (self.me, self.space if you_play else self.min_step, self.chord if you_play else self.solo_chord)
-        if self.hands == 1:
-            return [(*right, (low, high))]
-        left = (self.left, self.left_step, LEFT_CHORD, (low, min(high, LEFT_TOP)))
-        hands = [(*right, (max(low, RIGHT_BOTTOM), high)), left]
-        hands = [hand for hand in hands if hand[3][0] <= hand[3][1]]   # its octaves may leave room for one hand only
-        return hands or [(*right, (low, high))]
+        within = lambda lowest, highest: (max(low, lowest), min(high, highest)) \
+            if max(low, lowest) <= min(high, highest) else (low, high)
+        right = (self.me, self.min_step, 1, within(SOLO[0], SOLO[1])) if solos else \
+            (self.me, self.min_step, max(self.chord, 3), within(COMP[0], COMP[1]))
+        beat = 60 / self.pace * TIME_RESOLUTION * (0.5 if self._bossa() else 1)   # the least between its notes
+        beat = max(round(beat) - self.grid - 1, 5)
+        return [right] + ([(self.left, beat, 1, BASS)] if self._walks() else [])   # its octaves bound its right hand only
 
     def _seconds(self, tick):
         return (tick + self.base) / TIME_RESOLUTION
 
-    def _on_your_pulse(self, mask, earliest, latest, you_play, feel=None):
-        """Keeps only the onsets on your beat (while you play) or your tatum; unchanged while your rhythm is unclear.
-        Soloing over a tune (`feel`, see chart.feel): on that division of the beat, or unchanged when it is 0."""
-        pulse = self.listener.pulse(self._seconds(self.now()))
-        if pulse is None or feel == 0:
+    def _on_the_beat(self, mask, earliest, latest, feel=None):
+        """Keeps only the onsets on the tune's eighths, swung as it is; soloing (`feel`, see chart.feel), on that
+        division of the beat, or unchanged when it is 0."""
+        if feel == 0:
             return mask
-        unit = self.listener.beat(pulse[0]) if you_play and not self.chart else pulse[0]
-        swung = self.chart and feel in (None, 2) and chart.CHARTS[self.chart - 1].swing   # eighths, swung
-        if swung:   # the beat in three: its first third and its last
-            unit, pulse = self.listener.beat(pulse[0]) / 3, (pulse[0], self.began)
-        elif feel:
-            unit, pulse = self.listener.beat(pulse[0]) / feel, (pulse[0], self.began)
-        first = math.ceil((self._seconds(earliest) - pulse[1]) / unit - self.grid / (unit * TIME_RESOLUTION))
+        beat = 60 / self.pace
+        swung = feel in (None, 2) and chart.CHARTS[self.chart - 1].swing   # eighths, swung
+        unit = beat / 3 if swung else beat / (feel or 2)   # swung: the beat in three, its first third and its last
+        first = math.ceil((self._seconds(earliest) - self.began) / unit - self.grid / (unit * TIME_RESOLUTION))
         grid = torch.full_like(mask, -float('inf'))
         for k in range(first, first + math.ceil((latest - earliest) / (unit * TIME_RESOLUTION)) + 2):
             if swung and k % 3 == 1:
                 continue
-            tick = round((pulse[1] + k * unit) * TIME_RESOLUTION) - self.base
+            tick = round((self.began + k * unit) * TIME_RESOLUTION) - self.base
             grid[TIME_OFFSET + max(tick - self.grid, earliest):TIME_OFFSET + min(tick + self.grid, latest) + 1] = 0
         on = mask + grid
         return on if torch.isfinite(on).any() else mask
 
     def _partner(self, tick, line, register, right, comps=False):
         """Logits added to the pitches of one of its hands at `tick` (its `line`, its `register`; `right`: its right
-        hand; `comps`: the hand that comps under its solo over a tune, neither): your chord and key; where it plays
-        against you (_register); after your phrase, its answer."""
+        hand; `comps`: the hand that comps under its solo, neither): the chord of the bar and its scale; where it
+        plays against you (_register); after your phrase, its answer."""
         at, you_play = self._seconds(tick), tick - self.heard_at < PLAYING
         if self._bossa() and not right and not comps:   # its bass keeps to its figure's notes
             return self._bossa_bass(at, line).to(self.device)
         in_key = self.listener.in_key()
-        expected = self.mind.expect(at)[0] if self.recall and not self.chart else None   # the harmony it remembers comes next, not yours now
-        chord_tone = max(self.chord_tone, chart.CHANGES) if self.chart else self.chord_tone
+        chord_tone = max(self.chord_tone, chart.CHANGES)
         solos = right and self._solos(at, you_play)
         way = chart.way(self, at) if solos else None
         if way == 'bebop':
             chord_tone = 0   # what it plays over the chord comes from the soloists' habits instead (_bebop)
         bias = torch.tensor(self.listener.bias(at, chord_tone, 0 if way == 'bebop' else self.tension, self.out_of_key,
-                                               way)[:MAX_PITCH]
-                            + (0 if expected is None else self.recall * np.tile(expected, 11)[:MAX_PITCH]),
-                            dtype=torch.float) + self._register(tick, you_play, register, right)
-        if self.chart and not right and not comps:
+                                               way)[:MAX_PITCH], dtype=torch.float) \
+            + self._register(tick, you_play, register, right)
+        if not right and not comps:
             bias += self._walk(at, line)
         if solos:
             bias += self._bebop(at) if way == 'bebop' else self._approach(at, line, way)
@@ -668,7 +498,7 @@ class DuoSession:
             if answered > 0 and len(phrase) > 1:   # past your phrase's end it plays its intervals again, a sequence
                 step = (answered - 1) % (len(phrase) - 1) + 1
                 echo = (line[-1][1] - NOTE_OFFSET) % MAX_PITCH + phrase[step] - phrase[step - 1]
-                if in_key[echo % 12] < 0.5:   # your interval, bent into your key as a sequence would be
+                if in_key[echo % 12] < 0.5:   # your interval, bent into the tune's key as a sequence would be
                     echo += 1 if in_key[(echo + 1) % 12] >= in_key[(echo - 1) % 12] else -1
                 if 0 <= echo < MAX_PITCH:
                     bias[echo] += self.echo
@@ -812,7 +642,7 @@ class DuoSession:
 
     def _bossa(self):
         """Whether its bass plays a bossa's figure (BOSSA) over the tune instead of walking."""
-        return bool(self.chart) and chart.CHARTS[self.chart - 1].bass == 'bossa'
+        return chart.CHARTS[self.chart - 1].bass == 'bossa'
 
     def _bass_due(self, earliest, played):
         """The tick of the next note its bass owes from `earliest`, its last having been at `played`: on every beat,
@@ -826,7 +656,7 @@ class DuoSession:
                 return tick
 
     def _walk(self, at, line):
-        """Logits added to its left hand's pitches over a tune, a walking bass: the root when the bar or the chord
+        """Logits added to its left hand's pitches, a walking bass: the root when the bar or the chord
         begins; on the beat before another chord, a semitone from its root; and from one note to the next mostly by
         step."""
         bias, beat, low = torch.zeros(MAX_PITCH), 60 / self.pace, PITCHES < BASS_TOP
@@ -857,7 +687,7 @@ class DuoSession:
         return STYLE * torch.tensor(np.tile(steps, 11)[:MAX_PITCH], dtype=torch.float) * (PITCHES >= BASS_TOP)
 
     def _approach(self, at, line, way):
-        """Logits added to its pitches when it solos over a tune, for the chromatic approach: off the beat, a key a
+        """Logits added to its pitches when it solos, for the chromatic approach: off the beat, a key a
         semitone from a tone of the chord may be played though it is outside the scale; the note after it is that
         tone; and on the beat the chord's tones are its targets."""
         bias = torch.zeros(MAX_PITCH)
@@ -885,7 +715,7 @@ class DuoSession:
         to G5). AMT samples when before where: this moves its notes, never how often it plays."""
         bias = torch.zeros(MAX_PITCH)
         notes = self.listener.notes
-        if you_play and (right or not self.chart):   # over a tune its bass and comping keep to their registers
+        if you_play and right:   # its bass and the chords under its solo keep to their registers
             at, since = self._seconds(tick), self._seconds(self.heard_at - RECENT)
             playing = [p for o, d, p in notes if o >= since or o + d >= at or (o, p) in self.listener.held]
             yours = hands(playing)
@@ -967,7 +797,7 @@ class DuoSession:
         self.past, self.fed = None, 0
 
     def _mine(self):
-        """The instruments of its hands in the context (both, even while it plays with one: it played with two)."""
+        """The instruments of its hands in the context: its right hand, its bass and the chords under its solo."""
         return {self.me, self.left, self.comp}
 
     @staticmethod

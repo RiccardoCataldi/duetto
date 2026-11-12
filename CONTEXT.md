@@ -1,19 +1,16 @@
 # duetto
 
 A second piano that plays with you in real time: the Anticipatory Music Transformer, steered by rules that make it
-listen like a jazz partner, either freely or over a tune.
+listen like a jazz partner over a tune.
 
 ## Language
 
 ### Playing together
 
-**Mode**:
-How the duo plays: **Free** (it follows your key, chord and pulse) or **Tune** (it plays over a Tune's chords).
-_Avoid_: engine, strategy, real book mode
-
 **Tune**:
-A chart in `charts/`: a title, key, tempo and its chords bar by bar, played round and round.
-_Avoid_: chart (in the UI), song, real book, play along
+A chart in `charts/`: a title, key, tempo and its chords bar by bar, played round and round. The duo always plays
+over one: the first, until you choose another.
+_Avoid_: chart (in the UI), song, real book, play along, mode (there was a Free Mode with no Tune: it is gone)
 
 **Transport**:
 Whether a Tune is playing: Play starts its Count-in, Stop silences it. Never saved: the duo never starts by itself.
@@ -30,17 +27,12 @@ _Avoid_: role (that is a Character control), preset
 ### Shaping it
 
 **Character**:
-The nine musical controls (density, harmony, role, dialogue, groove, risk, focus, memory, key follow): one position
-for both Modes, each meaning the same musical intent in either.
+The nine musical controls (density, harmony, role, dialogue, groove, risk, focus, memory, key follow), each a
+musical intent.
 _Avoid_: macro (in the UI), musical controls
 
-**Preset**:
-A named position of the Character plus the Free Mode's texture (chord size, hands, octaves, timeout).
-_Avoid_: playing style, way
-
 **Knob**:
-One parameter of the model's rules, with a range and a default; each declares the Modes it acts in. Character
-controls turn Knobs.
+One parameter of the model's rules, with a range and a default. Character controls turn Knobs.
 _Avoid_: setting, param
 
 ### What it plays
@@ -56,7 +48,7 @@ scale, a chromatic approach off the beat, or an enclosure of the next Lick's fir
 _Avoid_: bridge (that is a Tune's B section), interpolation
 
 **Recall**:
-How closely it follows its memory of you: in Free Mode the Somax-style corpus of your playing, over a Tune your Licks.
+How many of the Licks it quotes are yours, from what you played over the Tune, rather than the great soloists'.
 _Avoid_: memory (as a Knob name)
 
 **Self window**:
