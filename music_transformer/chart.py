@@ -3,7 +3,7 @@ A chart, as in a Real Book: the chords of a tune bar by bar, in 4/4, for the duo
 A file in charts/ is a few `name: value` lines (title, key as "G minor", bpm, feel: straight for even eighths
 instead of swung ones) and then the bars, between `|`: one or
 more chords each, sharing the bar equally; `%` is the bar before again. Chords are spelt as in a Real Book or
-iReal Pro (Cm7, C-7, F7b9, Bbmaj7, B^7, Am7b5, Aø, Gm6, C7/E...) and heard as the nearest of listener.CHORDS.
+iReal Pro (Cm7, C-7, F7b9, C7#5, Bbmaj7, B^7, Am7b5, Aø, Gm6, C7/E...) and heard as the nearest of listener.CHORDS.
 """
 import glob
 import os
@@ -28,6 +28,8 @@ def chord(name):
     kind = kind.replace('o', 'dim').replace('min', 'm').replace('aug', '+').replace('sus', 'sus4').replace('sus44', 'sus4')
     if kind in CHORDS:
         return root, kind
+    if '7' in kind and ('#5' in kind or '+' in kind) and not kind.startswith('m'):   # C7#5, C7+, C+7, Caug7
+        return root, '7#5'
     for start, heard in (('m7b5', 'm7b5'), ('mmaj', 'mMaj7'), ('maj', 'maj7'), ('dim7', 'dim7'), ('dim', 'dim'),
                          ('m6', 'm6'), ('m', 'm7'), ('6', '6'), ('+', '+')):
         if kind.startswith(start):

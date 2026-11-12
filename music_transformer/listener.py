@@ -22,11 +22,12 @@ FORCE = 5.0      # the least logit taken from a pitch class outside a forced sca
 # the chords of jazz harmony: C6 is Am7 and Cm6 is Am7b5 (and dim7 is itself four times), told apart by the bass
 CHORDS = {'': (0, 4, 7), 'm': (0, 3, 7), '7': (0, 4, 7, 10), 'm7': (0, 3, 7, 10), 'dim': (0, 3, 6),
           'maj7': (0, 4, 7, 11), '6': (0, 4, 7, 9), 'm6': (0, 3, 7, 9), 'm7b5': (0, 3, 6, 10), 'dim7': (0, 3, 6, 9),
-          'mMaj7': (0, 3, 7, 11), 'sus4': (0, 5, 7), '7sus4': (0, 5, 7, 10), '+': (0, 4, 8)}
+          'mMaj7': (0, 3, 7, 11), 'sus4': (0, 5, 7), '7sus4': (0, 5, 7, 10), '+': (0, 4, 8),
+          '7#5': (0, 4, 8, 10)}
 # the tensions a jazz pianist colours each chord with, in semitones above its root: 9, #11 or 11, 13
 TENSIONS = {'': (2, 6, 9), 'maj7': (2, 6, 9), '6': (2, 6), 'm': (2, 5), 'm7': (2, 5, 9), 'm6': (2, 5),
             'mMaj7': (2, 5, 9), '7': (2, 9), 'm7b5': (5, 8), 'dim': (2, 5, 8, 11), 'dim7': (2, 5, 8, 11),
-            'sus4': (2, 9), '7sus4': (2, 9), '+': (2, 6)}
+            'sus4': (2, 9), '7sus4': (2, 9), '+': (2, 6), '7#5': (2,)}
 # over a chart: the scales that go with each chord, from its root; the one nearest the tune's key is played
 CHORD_SCALES = {
     'maj7': ('major', 'lydian'), '': ('major', 'lydian', 'mixolydian'), '6': ('major', 'lydian'),
@@ -35,7 +36,7 @@ CHORD_SCALES = {
     'm7': ('dorian', 'natural_minor', 'phrygian'), 'm': ('dorian', 'natural_minor', 'phrygian'),
     'm6': ('melodic_minor', 'dorian'), 'mMaj7': ('melodic_minor', 'harmonic_minor'),
     'm7b5': ('locrian', (0, 2, 3, 5, 6, 8, 10)), 'dim': ((0, 2, 3, 5, 6, 8, 9, 11),), 'dim7': ((0, 2, 3, 5, 6, 8, 9, 11),),
-    '+': ((0, 2, 4, 6, 8, 10),)}
+    '+': ((0, 2, 4, 6, 8, 10),), '7#5': ((0, 2, 4, 6, 8, 10), (0, 1, 3, 4, 6, 8, 10))}   # whole tone; altered
 CHART_FORCE = 10.0   # logit taken from a pitch outside the chord's scale over a chart: its bass's, and at the default
                      # `out_of_key` its line's
 BASS_TOP = 52    # over a chart, under E3 it is a bass: the chord's root, its fifth and its other tones only
@@ -236,7 +237,7 @@ class Listener:
         tonic = self.chart[1] % 12 if self.chart[1] is not None else root
         if name == 'arpeggio':
             steps, root = (), root
-        elif name == 'pentatonic' and kind not in ('dim', 'dim7', '+'):
+        elif name == 'pentatonic' and kind not in ('dim', 'dim7', '+', '7#5'):
             steps = (0, 3, 5, 6, 10) if kind == 'm7b5' else FORCED['minor_pentatonic'] if kind.startswith('m') and \
                 kind != 'maj7' else FORCED['major_pentatonic']
         elif name in ('blues', 'major_pentatonic'):

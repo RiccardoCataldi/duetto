@@ -144,6 +144,16 @@ class ChartTest(unittest.TestCase):
         listener.chart = (lambda now: (root, kind), key)
         return listener, listener.bias(0.0, 1.0, 1.0, 2.0)
 
+    def test_a_chart_spells_a_dominant_with_a_raised_fifth_as_it_sounds(self):
+        from music_transformer import chart
+        for name in ('C7#5', 'C7+', 'C+7', 'Caug7', 'C7(#5)'):
+            self.assertEqual(chart.chord(name), (0, '7#5'), name)
+        self.assertEqual(chart.chord('Fm9'), (5, 'm7'))
+        listener, bias = self.over(0, '7#5', 5)       # C7#5 to F minor: G# and Bb, never G
+        self.assertEqual(sorted(listener.harmony(0.0)[2]), [0, 4, 8, 10])
+        self.assertLess(bias[67], -9)
+        self.assertGreater(min(bias[p] for p in (60, 64, 68, 70)), 0)
+
     def test_over_a_chart_it_keeps_to_the_scale_of_the_chord(self):
         listener, bias = self.over(0, 'm7', 10)       # Cm7 in Bb major: C dorian
         self.assertEqual(sorted(np.flatnonzero(listener.chord_scale(0.0))), [0, 2, 3, 5, 7, 9, 10])
