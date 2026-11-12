@@ -66,7 +66,7 @@ class DuoSessionTest(unittest.TestCase):
     def test_a_tune_begins_after_a_bar_of_count_in_and_it_starts_by_itself_when_it_comps(self):
         with unittest.mock.patch('music_transformer.chart.COUNT', 1):
             self.clock.t = 0.5
-            self.session.turn(chart=self.tune('autumn_leaves'), part=0)   # 120 bpm: a bar is 2 s
+            self.session.turn(chart=self.tune('autumn_leaves'), playing=1, part=0)   # 120 bpm: a bar is 2 s
         self.assertEqual(self.session.began, 4.0)           # the next bar, and one of count-in
         self.assertEqual(self.session.state()['chart']['count'], 8)
         self.session.begin()
@@ -81,12 +81,26 @@ class DuoSessionTest(unittest.TestCase):
             list(self.fill())
         self.session.hear(self.clock.t, 0.3, 60)            # and you join when you like
         self.assertGreaterEqual(self.session.heard_at, 0)
-        duet = DuoSession(self.model, 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'))
+        duet = DuoSession(self.model, 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1)
         duet.begin()
         self.assertIsNone(duet.base)                        # in a duet it waits for you
 
+    def test_a_tune_plays_only_between_play_and_stop(self):
+        self.session.turn(chart=self.tune('autumn_leaves'), part=0)   # chosen, not played
+        for _ in range(30):
+            self.clock.t += 0.1
+            self.session.begin()
+        self.assertIsNone(self.session.base)
+        self.assertEqual(self.session.state()['chart']['bar'], -1)   # its page, no bar lit
+        self.session.turn(playing=1)
+        self.session.begin()
+        self.assertGreater(len([n for n in self.fill() if n]), 0)
+        self.session.turn(playing=0)
+        self.assertLessEqual(self.session._last_time(), self.session.now())   # what it had not sounded is gone
+        self.assertEqual([n for n in self.fill() if n], [])   # nothing more once stopped
+
     def test_trading_fours_you_solo_four_bars_then_it_does(self):
-        self.session.turn(chart=self.tune('blues_in_f'), part=3)
+        self.session.turn(chart=self.tune('blues_in_f'), playing=1, part=3)
         bar = 4 * 60 / 110
         self.assertEqual([self.session._solos(k * bar + 0.1, True) for k in (0, 3, 4, 7, 8, 12, 15, 16)],
                          [False, False, True, True, False, True, True, False])   # on through the 12 bars' end
@@ -95,7 +109,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual(self.session.state()['doing'], 'its turn')
 
     def test_over_a_tune_its_bass_walks_root_first_and_approaches_the_next_chord(self):
-        self.session.turn(chart=self.tune('blues_in_f'), part=0)   # F7 | Bb7: a beat is 0.545 s
+        self.session.turn(chart=self.tune('blues_in_f'), playing=1, part=0)   # F7 | Bb7: a beat is 0.545 s
         self.session.hear(0.0, 0.3, 65)
         beat = 60 / 110
         first = self.session._partner(self.session._tick(0.02), [], (36, 51), False)
@@ -108,7 +122,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual((hands[1][1] > 45, hands[1][2], hands[1][3][1]), (True, 1, 51))   # a note a beat, low
 
     def test_over_a_tune_key_follow_says_how_soon_it_leaves_the_tunes_chord_for_the_one_you_hold(self):
-        self.session.turn(chart=self.tune('blues_in_f'), part=0)   # F7 | Bb7 | F7: a beat is 0.545 s
+        self.session.turn(chart=self.tune('blues_in_f'), playing=1, part=0)   # F7 | Bb7 | F7: a beat is 0.545 s
         for pitch in (59, 63, 66, 69):                             # you hold B7 over them, for 4 s
             self.session.hear(0.0, 4.0, pitch)
 
@@ -127,7 +141,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual((bass(0.02), bass(3.0)), (41, 47))
 
     def test_over_a_tune_its_bass_plays_every_beat_while_its_right_hand_plays_and_breathes(self):
-        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=0,
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1, part=0,
                              phrase=4, breath=200)           # 120 bpm: a beat is 0.5 s
         session.hear(0.0, 0.3, 60)
         notes = []
@@ -150,7 +164,7 @@ class DuoSessionTest(unittest.TestCase):
                 return out
 
         for part, heard in ((0, False), (1, True), (1, False)):   # it comps; a duet, you playing or resting
-            session = DuoSession(Bassist(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=part,
+            session = DuoSession(Bassist(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1, part=part,
                                  max_rest=100, breath=60)
             start = self.clock.t
             session.hear(0.0, 0.3, 60)
@@ -173,7 +187,7 @@ class DuoSessionTest(unittest.TestCase):
         for knobs in ({'part': 1, 'licks': 0}, {'part': 1, 'licks': 1}, {'part': 1, 'licks': 0.5, 'grid': 0, 'bpm': 200},
                       {'part': 0}, {'part': 2}):
             clock = Clock()
-            session = DuoSession(UniformModel(), 'cpu', clock=clock, chart=self.tune('autumn_leaves'), **knobs)
+            session = DuoSession(UniformModel(), 'cpu', clock=clock, chart=self.tune('autumn_leaves'), playing=1, **knobs)
             session.hear(0.0, 0.3, 60)                       # then you rest: in a duet it solos
             notes = []
             for _ in range(300):
@@ -204,7 +218,7 @@ class DuoSessionTest(unittest.TestCase):
             self.assertGreater(sum(n[3] == 'left' for n in notes), 0.8 * 4 * bars)
 
     def test_over_a_tune_its_part_says_what_its_hands_do_whatever_the_other_knobs(self):
-        self.session.turn(chart=self.tune('blues_in_f'), part=0)
+        self.session.turn(chart=self.tune('blues_in_f'), playing=1, part=0)
         comps = self.session._hands(False, self.session._solos(1.0, False))
         self.assertEqual([(most, register) for _, _, most, register in comps], [(3, (53, 76)), (1, (28, 51))])
         self.session.turn(part=2)
@@ -220,7 +234,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual([hand[3] for hand in self.session._hands(False, True)], [(72, 95), (28, 51)])
 
     def test_over_a_tune_its_octaves_bound_its_right_hand_and_its_bass_walks_on_every_beat(self):
-        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=0,
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1, part=0,
                              lowest=5, highest=7)        # 120 bpm: a beat is 0.5 s
         session.hear(0.0, 0.3, 60)
         notes = []
@@ -241,7 +255,7 @@ class DuoSessionTest(unittest.TestCase):
                 out.logits[0, -1, TIME_OFFSET:TIME_OFFSET + 10000] = -torch.arange(10000).float()
                 return out
 
-        session = DuoSession(Eager(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=0, chord=4)
+        session = DuoSession(Eager(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1, part=0, chord=4)
         session.hear(0.0, 0.3, 60)
         notes = []
         for _ in range(100):
@@ -254,7 +268,7 @@ class DuoSessionTest(unittest.TestCase):
 
     def solo(self, seconds, **knobs):
         """(the session, its notes) after it soloed alone over Autumn Leaves (120 bpm: a bar is 2 s) for `seconds`."""
-        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=2, **knobs)
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1, part=2, **knobs)
         session.begin()
         notes = []
         for _ in range(round(seconds * 10)):
@@ -277,7 +291,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertGreater(outside[0.0, 'ways'], outside[5.0, 'ways'] + 150)   # and more often bebop or blues
 
     def test_over_a_tune_keeping_apart_from_your_hands_moves_its_right_hand_only(self):
-        self.session.turn(chart=self.tune('blues_in_f'), part=1)
+        self.session.turn(chart=self.tune('blues_in_f'), playing=1, part=1)
         for pitch in (41, 45, 48, 65, 69):           # you play in its bass's register, and in its right hand's
             self.session.hear(0.0, 2.0, pitch)
         tick = self.session._tick(0.6)
@@ -361,7 +375,7 @@ class DuoSessionTest(unittest.TestCase):
         second = list(zip((16.5, 16.75, 17.0, 17.25, 17.5, 17.75), (76, 72, 69, 66, 64, 62)))  # over Am7 | D7
         for part, recall in ((0, duo.EXACT), (2, duo.EXACT), (2, 0)):   # it comps, it solos
             clock = Clock()
-            session = DuoSession(UniformModel(), 'cpu', clock=clock, chart=tune, bpm=240, part=part, licks=1,
+            session = DuoSession(UniformModel(), 'cpu', clock=clock, chart=tune, playing=1, bpm=240, part=part, licks=1,
                                  recall=recall, echo=6, max_rest=50)   # (no long rest: it is there as a phrase begins)
             yours, notes, whose = first + second, [], set()
             while clock.t < 27.9:
@@ -380,7 +394,7 @@ class DuoSessionTest(unittest.TestCase):
             self.assertEqual((back(first, 8, 7), back(second, 9, 1), 'you' in whose), (recall > 0,) * 3, (part, recall))
 
     def test_over_a_tune_its_eighths_are_swung(self):
-        session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=self.tune('autumn_leaves'), part=0, hands=1,
+        session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=self.tune('autumn_leaves'), playing=1, part=0, hands=1,
                              breath=0, min_step=5)
         session.hear(0.0, 0.3, 60)
         onsets = sorted({session.play()[0] for _ in range(40)})
@@ -576,7 +590,7 @@ class DuoSessionTest(unittest.TestCase):
     def test_over_a_chart_it_plays_the_chord_of_the_bar_at_the_charts_tempo(self):
         from music_transformer.chart import CHARTS
         tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'autumn_leaves')
-        self.session.turn(chart=tune + 1)
+        self.session.turn(chart=tune + 1, playing=1)
         self.assertEqual((self.session.pace, self.session.state()['chord']), (120, 'Cm7 > F7'))
         self.clock.t = 10.2                          # bar 6 of 2 s each: D7, whose F# is not in G minor
         self.session.hear(10.2, 0.3, 62)
@@ -585,7 +599,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertGreater(bias[66], bias[65] + 1)
 
     def test_soloing_over_a_tune_it_approaches_a_chord_tone_by_a_semitone_and_lands_on_it(self):
-        self.session.turn(chart=self.tune('blues_in_f'), part=2, hands=1, apart=0, lead=0)   # F7 in the first bar
+        self.session.turn(chart=self.tune('blues_in_f'), playing=1, part=2, hands=1, apart=0, lead=0)   # F7 in the first bar
         self.session.hear(0.0, 0.3, 53)
         self.enterContext(unittest.mock.patch('music_transformer.chart.way', return_value='scale'))
         off = self.session._partner(self.session._tick(0.27), [], (0, 127), True)   # the "and" of the first beat
@@ -601,7 +615,7 @@ class DuoSessionTest(unittest.TestCase):
     def test_soloing_as_bebop_players_do_its_line_moves_by_step_and_hears_the_next_chord_coming(self):
         from music_transformer.chart import CHARTS
         tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'blues_in_f')   # 110 bpm: F7, then Bb7
-        self.session.turn(chart=tune + 1, part=2, hands=1, apart=0, lead=0)
+        self.session.turn(chart=tune + 1, playing=1, part=2, hands=1, apart=0, lead=0)
         self.session.hear(0.0, 0.3, 53)
         self.enterContext(unittest.mock.patch('music_transformer.chart.way', return_value='bebop'))
         line = [(20, NOTE_OFFSET + 4 * MAX_PITCH + 72)]             # it has just played C5
@@ -616,7 +630,7 @@ class DuoSessionTest(unittest.TestCase):
         from music_transformer.chart import CHARTS
         tune = next(i for i, chart in enumerate(CHARTS) if chart.name == 'autumn_leaves')   # 120 bpm: a beat is 0.5 s
         for division, step in ((3, 1 / 6), (4, 0.125)):
-            session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=tune + 1, part=2, hands=1, breath=0, licks=0)
+            session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=tune + 1, playing=1, part=2, hands=1, breath=0, licks=0)
             session.hear(0.0, 0.3, 60)
             with unittest.mock.patch('music_transformer.chart.feel', return_value=division), \
                     unittest.mock.patch('music_transformer.chart.way', return_value='bebop'):
@@ -769,7 +783,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual(state['mode'], 'free')
         self.assertLessEqual(free_only, set(state['active']))
         self.assertFalse(tune_only & set(state['active']))
-        self.session.turn(chart=self.tune('autumn_leaves'))
+        self.session.turn(chart=self.tune('autumn_leaves'), playing=1)
         state = self.session.state()
         self.assertEqual(state['mode'], 'tune')
         self.assertLessEqual(tune_only | {'recall', 'echo', 'stay', 'self_window'}, set(state['active']))

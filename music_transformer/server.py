@@ -98,7 +98,7 @@ def make_handler(player):
                         knobs[name] = knob(name, float(values[1]))
                         for session, inbox in playing:
                             session.turn(**{name: knobs[name]})
-                            if name in ('bpm', 'metronome', 'chart'):
+                            if name in ('bpm', 'metronome', 'chart', 'playing'):
                                 inbox.put(('tempo',))
                         print(f"duo: {name} = {knobs[name]}")
             except (ConnectionResetError, ValueError) as e:
@@ -124,6 +124,7 @@ def make_handler(player):
                 print("duo: started")
                 inbox = queue.Queue()
                 threading.Thread(target=self.read, args=(inbox, first), daemon=True).start()
+                knobs['playing'] = 0   # a tune waits for Play, whatever the duo before left
                 session = player.session(started=opened, **knobs)
                 heard, played, shown = 0, 0, None
                 sampling, answers, since = [], [], None   # seconds to sample each note; from your note to its next
@@ -143,11 +144,17 @@ def make_handler(player):
                         if note is None:
                             break
                         if note and note[0] == 'tempo':
-                            self.wfile.write(f"tempo {session.pace} {session.metronome} {session.began:.3f}\n".encode())
+                            # it clicks while a tune plays, or, free, once the duo has begun
+                            clicks = session.metronome and (session.playing if session.chart else session.base is not None)
+                            self.wfile.write(f"tempo {session.pace} {int(clicks)} {session.began:.3f}\n".encode())
+                            if session.chart and not session.playing:   # stopped: what it has not sounded goes
+                                self.wfile.write(f"cut {time.monotonic() - opened:.3f}\n".encode())
                         elif note and note[0] == 'off':
                             session.release(*note[1:])
                         elif note:
                             heard += 1
+                            if heard == 1:
+                                inbox.put(('tempo',))   # free, its click starts with your first note
                             since = since or time.perf_counter()
                             cut = session.hear(*note[1:])
                             key = session.listener.said_key()

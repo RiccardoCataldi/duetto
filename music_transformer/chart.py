@@ -149,7 +149,9 @@ def reading(session, state):
         quoting = getattr(session, 'quoting', None)
         if quoting and now < quoting[1]:   # whose phrase it is playing
             state['chart']['quote'] = quoting[0]
-        if now < session.began:   # the count-in: no bar yet, and the beats still to go
+        if not session.playing:   # stopped: its page, no bar lit
+            state['key'], state['chord'], state['chart']['bar'] = tune.title, None, -1
+        elif now < session.began:   # the count-in: no bar yet, and the beats still to go
             left = int((session.began - now) * session.pace / 60) + 1
             state['key'], state['chart']['bar'], state['chart']['count'] = f"{tune.title} in {left}", -1, left
     return state

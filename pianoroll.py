@@ -392,6 +392,9 @@ def live(port_name, server):
             if typed and event.type in (pygame.KEYDOWN, pygame.KEYUP) and typing.handles(pygame.key.name(event.key)):
                 typing.key(pygame.key.name(event.key), event.type == pygame.KEYDOWN)
                 continue   # F and K are keys of the piano now
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:   # no key of the laptop's piano
+                panel.mind.transport()
+                continue
             if event.type == pygame.KEYDOWN and event.key in (pygame.K_f, pygame.K_k, pygame.K_F11, pygame.K_TAB):
                 if event.key in (pygame.K_f, pygame.K_F11):
                     pygame.display.toggle_fullscreen()

@@ -139,6 +139,8 @@ KNOBS = {
     'bpm': (0, 0, 240, 'bpm', "the tempo it keeps to, its beats on the metronome's: yours as it hears it, or one you fix"),
     'metronome': (0, 0, 1, 'choice:off/on', "a click on each beat of the tempo you fix"),
     'chart': chart.KNOB(),
+    'playing': (0, 0, 1, 'choice:stopped/playing', "whether the tune plays: Play counts it in from the next bar, Stop "
+                "silences it; never kept, so a tune never starts by itself"),
     'licks': (0.4, 0.0, 1.0, '', "over a tune, how much of its solo is phrases of the great soloists, or yours, note for note, "
               "each over the chords it was played over: 0: none, its own lines only; at the top: one after another"),
     'part': (1, 0, 3, 'choice:comps/duet/solos/trades', "over a tune: it comps, with a walking bass, for you to solo; "
@@ -150,7 +152,7 @@ RECALLED = ('decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic', 'itse
 MODES = {**dict.fromkeys(KNOBS, ('free', 'tune')),
          **dict.fromkeys(('space', 'solo_chord', 'timeout', 'silence', 'sparse', *RECALLED, 'hands', 'left_step', 'root',
                           'scale'), ('free',)),
-         **dict.fromkeys(('licks', 'part'), ('tune',))}
+         **dict.fromkeys(('licks', 'part', 'playing'), ('tune',))}
 
 
 def acting(knobs):
@@ -212,9 +214,13 @@ class DuoSession:
             self.listener.stay(self.stay)
         if 'root' in knobs or 'scale' in knobs:
             self.listener.force(self.root, list(FORCED)[self.scale - 1] if self.scale else None)
-        if 'bpm' in knobs or 'chart' in knobs:
-            chart.follow(self, 'chart' in knobs)
+        if 'bpm' in knobs or 'chart' in knobs or 'playing' in knobs:
+            chart.follow(self, 'chart' in knobs or 'playing' in knobs)   # Play: a count-in from the next bar
             self.quotes, self.quoted = {}, [0, 0]   # the bars are others
+        if 'playing' in knobs and not self.playing and getattr(self, 'base', None) is not None:   # Stop: what it has not sounded goes
+            cut = self._seconds(self.now())
+            self._unwind(self.now())
+            self.spoken, self.plan = [onset for onset in self.spoken if onset < cut], []
 
     def state(self):
         """What it hears and what it is doing: {'mode': free or tune, 'doing', 'key', 'chord', 'bpm', 'active': the
@@ -246,7 +252,7 @@ class DuoSession:
     def begin(self):
         """Over a tune, when it comps or solos for you (not in a duet, where it follows you), it starts by itself as
         the count-in ends: your first note is not what it waits for."""
-        if self.base is None and self.chart and self.part != 1 and \
+        if self.base is None and self.chart and self.playing and self.part != 1 and \
                 self.clock() - self.started >= self.began - LOOKAHEAD / TIME_RESOLUTION:
             self.base = round((self.clock() - self.started) * TIME_RESOLUTION)
             self.heard_at = -10 ** 6   # you have not played: as if long ago
@@ -272,6 +278,8 @@ class DuoSession:
 
     def ahead(self):
         """Ticks of music already sampled beyond now; the caller samples more while this is under LOOKAHEAD."""
+        if self.chart and not self.playing:   # a tune stopped: it waits for Play
+            return LOOKAHEAD + 5
         # its bass walks on while its right hand breathes
         now, last = self.now(), max(self._last_time(), 0 if self._walks() else self._breath(), self._tick(self.cursor))
         return LOOKAHEAD + 5 if self._timed_out(max(last, now)) and not self.owed else last - now

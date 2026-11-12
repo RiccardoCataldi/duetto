@@ -97,7 +97,7 @@ ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'an
             ('Imagination', ('temperature', 'top_p', 'self_window')),
             ('Memory of you', ('recall', 'silence', 'sparse', 'decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic',
                                'itself', 'probabilistic')),
-            ('Tune', ('chart', 'part', 'licks', 'bpm', 'metronome')),
+            ('Tune', ('chart', 'playing', 'part', 'licks', 'bpm', 'metronome')),
             ('Range & key', ('lowest', 'highest', 'root', 'scale'))]
 SOUND_GROUPS = [('Mix', ('volume', 'pan', 'reverb')),
                 ('Envelope', ('attack', 'decay', 'sustain', 'release')), ('Delay', ('echo', 'delay', 'feedback'))]
@@ -242,11 +242,18 @@ class Mind:
             sock.sendall(f"set {knob.name} {knob.value:.4f}\n".encode())
         except OSError:
             return
-        if keep:
+        if knob.name == 'chart' and 'playing' in self.knobs:
+            self.knobs['playing'].set(0)   # another tune waits for Play
+        if keep and knob.name != 'playing':   # a tune never starts by itself
             self._saved('knobs')[knob.name] = knob.value
             self._save()
             if knob.name == 'chart' and knob.value and 'metronome' in self.knobs:
                 self.knobs['metronome'].set(1)   # a chart starts with its click: the knob says so, and turns it off
+
+    def transport(self):
+        """Plays the tune chosen, or stops it."""
+        if 'playing' in self.knobs and self.knobs['chart'].value:
+            self.knobs['playing'].set(1 - self.knobs['playing'].value)
 
     def _macro(self, macro):
         for name, anchors in self.turns[macro.name].items():
@@ -356,7 +363,12 @@ class Panel:
         else:
             cards = ('Presets', [(preset[0], preset[1], self.mind.playing(preset),
                                   lambda preset=preset: self.mind.play(preset)) for preset in self.mind.presets()])
-        return [('', [knobs['chart']]), cards,
+        sections = [('', [knobs['chart']])]
+        if 'playing' in knobs:   # a tune chosen: Play or Stop under it
+            playing = knobs['playing'].value
+            sections.append(('', [('Stop' if playing else 'Play', 'Space bar: the tune from a bar of count-in, or stop it',
+                                   bool(playing), self.mind.transport)]))
+        return sections + [cards,
                 ('Character', [macro for macro in self.mind.macros if self.mind.active(macro)]),
                 ('Octaves', [knobs[n] for n in ('lowest', 'highest') if n in knobs])]
 
