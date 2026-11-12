@@ -36,7 +36,8 @@ CHORD_SCALES = {
     'm6': ('melodic_minor', 'dorian'), 'mMaj7': ('melodic_minor', 'harmonic_minor'),
     'm7b5': ('locrian', (0, 2, 3, 5, 6, 8, 10)), 'dim': ((0, 2, 3, 5, 6, 8, 9, 11),), 'dim7': ((0, 2, 3, 5, 6, 8, 9, 11),),
     '+': ((0, 2, 4, 6, 8, 10),)}
-CHART_FORCE = 10.0   # logit taken from a pitch outside the chord's scale over a chart: it does not play it
+CHART_FORCE = 10.0   # logit taken from a pitch outside the chord's scale over a chart: its bass's, and at the default
+                     # `out_of_key` its line's
 BASS_TOP = 52    # over a chart, under E3 it is a bass: the chord's root, its fifth and its other tones only
 ROOT = 3.0       # logit added to the root there, and half of it to the fifth
 AVOID = 3.0      # logit taken from a chord's avoid notes: a semitone over one of its tones (E over your C minor)
@@ -256,8 +257,11 @@ class Listener:
                 [p % 12 == (harmony[0] + 7) % 12 and p % 12 in chord for p in range(128)])
             low = bass * (ROOT * root - CHART_FORCE * np.array([p % 12 not in chord for p in range(128)]))
             avoid = set() if palette == 'bebop' else {(tone + 1) % 12 for tone in chord} - chord - colours
+            # over its bass as firmly as `out_of_key` says, from none (outside, as without a chart) to more than twice
+            # CHART_FORCE (inside); its bass keeps to it
+            force = np.where(bass, CHART_FORCE, CHART_FORCE * out_of_key / 2)
             return low + np.array([chord_tone * (p % 12 in chord) + tension * (p % 12 in colours)
-                                   - AVOID * (p % 12 in avoid) - CHART_FORCE * (1 - in_key[p % 12]) for p in range(128)])
+                                   - AVOID * (p % 12 in avoid) - force[p] * (1 - in_key[p % 12]) for p in range(128)])
         avoid = {(tone + 1) % 12 for tone in chord} - chord - colours
         free = colours if self.forced and not self.chart else colours | chord   # the chord you play is never out of your key
         return np.array([chord_tone * (p % 12 in chord) + tension * (p % 12 in colours) - AVOID * (p % 12 in avoid)

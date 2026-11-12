@@ -197,8 +197,41 @@ class DuoSessionTest(unittest.TestCase):
         self.session.turn(part=1)                    # a duet: chords under you, a line when you rest, the bass on
         self.assertEqual([hand[2] for hand in self.session._hands(True, self.session._solos(1.0, True))], [3, 1])
         self.assertEqual([hand[2] for hand in self.session._hands(False, self.session._solos(1.0, False))], [1, 1])
-        self.session.turn(lowest=5, highest=6)       # its octaves still hold: C5 to B6, and no room for a bass there
-        self.assertEqual([hand[3] for hand in self.session._hands(False, True)], [(72, 95)])
+        self.session.turn(lowest=5, highest=6)       # its octaves still hold its line, C5 to B6; its bass keeps its own
+        self.assertEqual([hand[3] for hand in self.session._hands(False, True)], [(72, 95), (28, 51)])
+
+    def test_over_a_tune_its_octaves_bound_its_right_hand_and_its_bass_walks_on_every_beat(self):
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=0,
+                             lowest=5, highest=7)        # 120 bpm: a beat is 0.5 s
+        session.hear(0.0, 0.3, 60)
+        notes = []
+        for _ in range(80):
+            self.clock.t += 0.1
+            while session.ahead() < duo.LOOKAHEAD:
+                notes.append(session.play())
+        bass = sorted({round(n[0] * 2) for n in notes if n and n[3] == 'left'})
+        self.assertEqual(bass, list(range(bass[0], bass[-1] + 1)))   # no beat without its bass note
+        self.assertGreater(len(bass), 12)
+        self.assertTrue(all(n[2] < 52 for n in notes if n and n[3] == 'left'))
+        self.assertTrue(all(n[2] >= 72 for n in notes if n and n[3] == 'right'))
+
+    def test_over_a_tune_it_comps_more_than_four_chords_before_a_breath(self):
+        class Eager(UniformModel):   # every note as soon as it may: its chords full
+            def __call__(self, inp, past_key_values=None, use_cache=True):
+                out = super().__call__(inp, past_key_values, use_cache)
+                out.logits[0, -1, TIME_OFFSET:TIME_OFFSET + 10000] = -torch.arange(10000).float()
+                return out
+
+        session = DuoSession(Eager(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=0, chord=4)
+        session.hear(0.0, 0.3, 60)
+        notes = []
+        for _ in range(100):
+            self.clock.t += 0.1
+            while session.ahead() < duo.LOOKAHEAD:
+                notes.append(session.play())
+        onsets = sorted(n[0] for n in notes if n and n[3] == 'right')
+        breath = next(b for a, b in zip(onsets, onsets[1:]) if b - a > 1.4)   # a breath is 1.5 s
+        self.assertGreater(sum(onsets.count(onset) == 4 for onset in set(onsets) if onset < breath), 4)
 
     def solo(self, seconds, **knobs):
         """(the session, its notes) after it soloed alone over Autumn Leaves (120 bpm: a bar is 2 s) for `seconds`."""
@@ -210,6 +243,33 @@ class DuoSessionTest(unittest.TestCase):
             while session.ahead() < duo.LOOKAHEAD:
                 notes.append(session.play())
         return session, [note for note in notes if note]
+
+    def test_over_a_tune_harmony_outside_leaves_the_chords_scale_and_inside_keeps_to_it(self):
+        from music_transformer import chart
+        outside = {}
+        for out_of_key in (0.0, 5.0):                # harmony fully outside, fully inside
+            with unittest.mock.patch('music_transformer.chart.way', return_value='scale'):
+                session, notes = self.solo(16, licks=0, out_of_key=out_of_key)
+            outside[out_of_key] = sum(not session.listener.chord_scale(n[0])[n[2] % 12] for n in notes)
+            session.out_of_key, at = out_of_key, [k * 2 * 4 * 60 / session.pace for k in range(200)]
+            outside[out_of_key, 'ways'] = sum(chart.way(session, seconds) in ('bebop', 'blues') for seconds in at)
+        self.assertGreater(outside[0.0], 5)
+        self.assertEqual(outside[5.0], 0)
+        self.assertGreater(outside[0.0, 'ways'], outside[5.0, 'ways'] + 20)   # and more often bebop or blues
+
+    def test_over_a_tune_keeping_apart_from_your_hands_moves_its_right_hand_only(self):
+        self.session.turn(chart=self.tune('blues_in_f'), part=1)
+        for pitch in (41, 45, 48, 65, 69):           # you play in its bass's register, and in its right hand's
+            self.session.hear(0.0, 2.0, pitch)
+        tick = self.session._tick(0.6)
+
+        def bias(apart, *hand):
+            self.session.turn(apart=apart)
+            return self.session._partner(tick, [], *hand)
+
+        for hand in (((28, 51), False), ((52, 69), False, True)):   # its walking bass, the chords under its solo
+            self.assertTrue(torch.equal(bias(6.0, *hand), bias(0.0, *hand)))
+        self.assertLess(float((bias(6.0, (53, 76), True) - bias(0.0, (53, 76), True)).min()), -5)
 
     def test_soloing_it_quotes_a_phrase_played_over_the_same_chords_in_the_key_of_the_tune(self):
         from music_transformer import licks

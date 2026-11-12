@@ -91,8 +91,10 @@ def beats(session, seconds):
 
 def way(session, seconds):
     """How it solos at `seconds`, one of listener.palette()'s: another, by chance, every two bars. In a major key
-    the major pentatonic of the key is one more."""
-    ways = WAYS + (('major_pentatonic',) if (CHARTS[session.chart - 1].key or 0) < 12 else ())
+    the major pentatonic of the key is one more; the further its `out_of_key` is under its default (2), the more
+    often bebop and blues, the ways that leave the scale."""
+    ways = WAYS + (('major_pentatonic',) if (CHARTS[session.chart - 1].key or 0) < 12 else ()) \
+        + ('bebop', 'blues') * round(max(2 - session.out_of_key, 0))
     return random.Random(session.varied + beats(session, seconds) // PHRASE).choice(ways)
 
 

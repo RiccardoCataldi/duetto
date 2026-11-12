@@ -389,15 +389,12 @@ class DuoSession:
         # nothing is played past the chord it owes next
         comp, stab = None, self._stab(earliest) if solos and walks else None
         if stab and (due is None or stab[0] <= due + self.grid):
-            low, high = self.octaves()
-            register = (max(low, UNDER[0]), min(high, UNDER[1]))
-            if register[0] + 12 <= register[1]:   # its octaves leave its chords room
-                for *_, window in hands:
-                    window[stab[1] + 1:] = -float('inf')
-                window = torch.full((MAX_TIME,), -float('inf'))
-                window[stab[0]:stab[1] + 1] = 0
-                comp = (self.comp, self._my_line(self.comp), register, window)
-                hands.append(comp)
+            for *_, window in hands:
+                window[stab[1] + 1:] = -float('inf')
+            window = torch.full((MAX_TIME,), -float('inf'))
+            window[stab[0]:stab[1] + 1] = 0
+            comp = (self.comp, self._my_line(self.comp), UNDER, window)   # whatever its octaves: they bound its line
+            hands.append(comp)
         # over its walking bass its right hand is owed a note too, once it has kept silent for `max_rest` (and its
         # breath): the model, left to choose, hears a bass alone and goes on with a bass alone
         right, late = next((hand for hand in hands if hand[0] == self.me), None), False
@@ -552,7 +549,8 @@ class DuoSession:
         while start > 0 and self.spoken[start] - self.spoken[start - 1] < gap:
             start -= 1
         notes = self.phrase * random.Random(self.spoken[start]).uniform(0.6, 1.4)
-        if len(self.spoken) - start < notes:
+        said = self.spoken[start:]
+        if len(set(said) if self.chart else said) < notes:   # over a tune a chord it comps is one
             return 0
         last = round(self.spoken[-1] * TIME_RESOLUTION) - self.base
         if self.chart and self._solos(self._seconds(last), self.now() - self.heard_at < PLAYING):
@@ -564,10 +562,8 @@ class DuoSession:
 
     def _walks(self):
         """Whether its left hand walks a bass over the tune: its part says so, whatever its `hands` (a preset for
-        playing without a tune may have left it one): unless it solos for you to comp, or its octaves leave a bass
-        no room."""
-        low, high = self.octaves()
-        return bool(self.chart) and self.part != 2 and max(low, BASS[0]) <= min(high, BASS[1])
+        playing without a tune may have left it one) or its octaves: unless it solos for you to comp."""
+        return bool(self.chart) and self.part != 2
 
     def _hands(self, you_play, solos=False):
         """(instrument, step, most notes at once, (lowest, highest) pitch) of each hand it plays with. Over a tune
@@ -581,7 +577,7 @@ class DuoSession:
             right = (self.me, self.min_step, 1, within(SOLO[0], SOLO[1])) if solos else \
                 (self.me, self.min_step, max(self.chord, 3), within(COMP[0], COMP[1]))
             beat = max(round(60 / self.pace * TIME_RESOLUTION) - self.grid - 1, 5)
-            return [right] + ([(self.left, beat, 1, within(BASS[0], BASS_TOP - 1))] if self._walks() else [])
+            return [right] + ([(self.left, beat, 1, BASS)] if self._walks() else [])   # its octaves bound its right hand only
         right = (self.me, self.space if you_play else self.min_step, self.chord if you_play else self.solo_chord)
         if self.hands == 1:
             return [(*right, (low, high))]
@@ -733,6 +729,7 @@ class DuoSession:
         if abs(chart.beats(self, at) % 1 - 0.5) < 0.35:   # off the beat
             near = torch.roll(chord, 1) | torch.roll(chord, -1)
             outside = torch.tensor([not scale[p % 12] and p % 12 not in tones for p in range(MAX_PITCH)])
+            # what the default `out_of_key` takes, given back: inside fewer, outside more
             bias[near & outside & (PITCHES >= BASS_TOP)] += CHART_FORCE - APPROACH
         else:
             bias[chord] += TARGET
@@ -745,7 +742,7 @@ class DuoSession:
         to G5). AMT samples when before where: this moves its notes, never how often it plays."""
         bias = torch.zeros(MAX_PITCH)
         notes = self.listener.notes
-        if you_play:
+        if you_play and (right or not self.chart):   # over a tune its bass and comping keep to their registers
             at, since = self._seconds(tick), self._seconds(self.heard_at - RECENT)
             playing = [p for o, d, p in notes if o >= since or o + d >= at or (o, p) in self.listener.held]
             yours = hands(playing)
