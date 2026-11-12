@@ -43,6 +43,9 @@ AVOID = 3.0      # logit taken from a chord's avoid notes: a semitone over one o
 BASS = 0.15      # how much the lowest sounding note says the chord's root is
 
 STAY = 0.97      # chance per note that the key stays: lower follows a modulation sooner but flickers on passing notes
+# over a chart the same stay says how long you must hold a chord of your own before it leaves the chart's for it: no
+# time at QUICK, for ever at STEADY, (stay - QUICK) / (STEADY - stay) beats in between: at STAY about five, over a bar
+QUICK, STEADY = 0.85, 0.995
 SHARPNESS = 2.0  # how much one note says about the key
 SURE = 0.6       # how likely a key must be before it is the one it says you are in: lower flickers between neighbours
 FAR = 0.6        # each step round the circle of fifths makes a modulation there about 1.8 times less likely
@@ -97,7 +100,7 @@ class Listener:
         self.notes = []   # (onset, duration, pitch), oldest first
         self.held = set() # (onset, pitch) of your notes still sounding: their duration is only a guess until release()
         self.releases = False   # whether you say when your notes stop sounding (main.py does)
-        self.move = MOVE
+        self.move, self.stays = MOVE, STAY
         self.forced = None      # (root, scale in FORCED) it keeps to instead of your key
         self.tempo = None       # seconds a beat of a tempo you fix lasts, a beat on `origin`; None: your pulse
         self.origin = 0.0
@@ -105,8 +108,8 @@ class Listener:
         self.chart = None       # (chord(now) -> (root, kind), key) of a chart it follows instead of your chord and key
 
     def stay(self, stay):
-        """Sets STAY for this listener."""
-        self.move = _transitions(stay)
+        """Sets STAY for this listener; over a chart, how long you hold a chord before it follows it (harmony)."""
+        self.move, self.stays = _transitions(stay), stay
 
     def force(self, root, scale):
         """Keeps it to `scale` (in FORCED) from `root` (0 = C) instead of your key; None for your key again."""
@@ -166,10 +169,18 @@ class Listener:
 
     def harmony(self, now):
         """(root, kind, pitch classes) of the chord you are playing now, e.g. (7, '7', {7, 11, 2, 5}), or None; the
-        chart's chord at `now` when it follows one."""
+        chart's chord at `now` when it follows one, unless you reharmonise it: then the chord you are holding, once
+        you have held it as long as its stay asks (QUICK, STEADY), until you let it go."""
         if self.chart:
             root, kind = self.chart[0](now)
-            return root, kind, {(root + step) % 12 for step in CHORDS[kind]}
+            written = {(root + step) % 12 for step in CHORDS[kind]}
+            yours = {pitch % 12 for onset, duration, pitch in self.notes
+                     if onset <= now and ((onset, pitch) in self.held or onset + duration >= now)
+                     and (now - onset) * (STEADY - self.stays) >= (self.stays - QUICK) * self.tempo}
+            # a line, a shell, or a voicing of the chart's chord with its tensions and no root, is no other chord: its
+            # bass keeps the chart's root under it
+            if len(yours) < 3 or yours <= written | {(root + step) % 12 for step in TENSIONS[kind]}:
+                return root, kind, written
         weight, bass = np.zeros(12), None
         for onset, duration, pitch in self.notes:
             if onset <= now:
