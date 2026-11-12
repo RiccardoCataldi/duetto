@@ -107,6 +107,25 @@ class DuoSessionTest(unittest.TestCase):
         hands = self.session._hands(False)
         self.assertEqual((hands[1][1] > 45, hands[1][2], hands[1][3][1]), (True, 1, 51))   # a note a beat, low
 
+    def test_over_a_tune_key_follow_says_how_soon_it_leaves_the_tunes_chord_for_the_one_you_hold(self):
+        self.session.turn(chart=self.tune('blues_in_f'), part=0)   # F7 | Bb7 | F7: a beat is 0.545 s
+        for pitch in (59, 63, 66, 69):                             # you hold B7 over them, for 4 s
+            self.session.hear(0.0, 4.0, pitch)
+
+        def bass(at):
+            return int(self.session._partner(self.session._tick(at), [], (36, 51), False)[36:52].argmax()) + 36
+
+        def leans(at):   # how much its right hand prefers your chord's F# to the tune's F, over your hands
+            bias = self.session._partner(self.session._tick(at), [], (0, 127), True)
+            return float(bias[78] - bias[77])
+        self.session.turn(stay=0.995)                              # steady: the tune's chord, whatever you play
+        self.assertEqual((bass(0.02), leans(0.02) < -1), (41, True))
+        self.session.turn(stay=0.85)                               # quick: yours at once, its bass on B
+        self.assertEqual((bass(0.02), leans(0.02) > 1), (47, True))
+        self.assertEqual((bass(4.4), leans(4.4) < -1), (41, True))   # you let it go: F7 again, in the third bar
+        self.session.turn(stay=0.97)                               # in between: once you have held it over a bar
+        self.assertEqual((bass(0.02), bass(3.0)), (41, 47))
+
     def test_over_a_tune_its_bass_plays_every_beat_while_its_right_hand_plays_and_breathes(self):
         session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), part=0,
                              phrase=4, breath=200)           # 120 bpm: a beat is 0.5 s
