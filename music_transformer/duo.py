@@ -678,7 +678,7 @@ class DuoSession:
                 low, high, near, self.quoting and self.quoting[0].split(' · ')[0], ahead)
             found = None
             if self.licks > 0 and owed:
-                if rng.random() < self.recall / EXACT:
+                if self.yours and rng.random() < self.recall / EXACT:
                     # echo is how closely its answer follows your phrase: here, how often it is that phrase itself
                     last = rng.random() < self.echo / KNOBS['echo'][2]
                     found = quote({'players': [['you']], 'licks': {
