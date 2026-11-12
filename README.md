@@ -4,161 +4,58 @@
 
 ![You in orange, the model in blue, on the piano roll](samples/duo/duetto.gif)
 
-Play a MIDI keyboard and a transformer plays a second piano with you, in real time. It listens like a partner: your key, the chord you play, your pulse, your phrases. It comps while you play and takes the melody when you rest.
+Play a MIDI keyboard and a transformer plays a second piano with you, in real time. It listens like a partner (your key, your chord, your pulse, your phrases), comps while you play and takes the melody when you rest. Or pick a tune from a Real Book and it plays it with you: walking bass, comping, solos.
 
 ▶ **[Watch a full improvisation on YouTube](https://www.youtube.com/watch?v=0qvRMhN8qa4)**
 
 https://github.com/user-attachments/assets/41a18857-2421-4c9a-b8b0-83cfdad1ff84
 
-The model is the pretrained [Anticipatory Music Transformer](https://github.com/jthickstun/anticipation) (Lakh MIDI), running on a PC with a GPU; the laptop handles MIDI, sound and the piano roll.
-
-https://github.com/user-attachments/assets/bd7c846d-0ae0-4ff4-a644-22b97c01049c
-
-Above: you play low chords, the model improvises over them (the **it solos** preset). Files in [samples/duo](samples/duo).
-
-## How it works
-
-Two machines: the laptop has the keyboard, the sound and the window; the model runs where the GPU is, behind an SSH tunnel. They talk over one TCP connection, a line of text per message ([music_transformer/server.py](music_transformer/server.py) lists them).
-
-```mermaid
-flowchart LR
-    subgraph LAPTOP["Laptop: keyboard, sound, window"]
-        direction TB
-        KEYS["MIDI keyboard<br/>or the laptop's keys"]
-        MAIN["main.py<br/>sends your notes, plays the model's<br/>on time, shapes its dynamics,<br/>clicks the metronome, saves the duo"]
-        SYNTH["FluidSynth + sound.py<br/>two pianos: instrument, envelope,<br/>reverb, delay"]
-        ROLL["pianoroll.py<br/>the piano roll, the chart<br/>and whose phrase it quotes"]
-        PANEL["knobs.py<br/>presets, musical controls,<br/>every knob of the model"]
-        SAVED[("generated/<br/>your saved duos")]
-        KEYS --> MAIN
-        MAIN -- "MIDI" --> SYNTH
-        MAIN -. "MIDI" .-> ROLL
-        ROLL --- PANEL
-        PANEL -- "sound knobs" --> SYNTH
-        MAIN --> SAVED
-    end
-
-    subgraph GPU["PC with a GPU: the model"]
-        direction TB
-        SERVER["server.py<br/>one duo at a time: keeps a second<br/>of its notes sampled ahead of now"]
-        subgraph SESSION["duo.py: DuoSession, one note at a time"]
-            direction TB
-            LISTENER["listener.py<br/>your key, chord, pulse, phrase"]
-            MEMORY["memory.py<br/>what you played, as a corpus:<br/>what comes next, and when"]
-            CHART["chart.py<br/>a tune: its chords bar by bar,<br/>the count-in, who solos and how"]
-            LICKS["licks.py + bebop.py<br/>phrases of the great soloists<br/>over these chords, and their habits"]
-            RULES["masks and biases<br/>when each hand may play,<br/>which pitches it leans on"]
-            MODEL["amt.py + graphed.py<br/>Anticipatory Music Transformer:<br/>when, how long, which note"]
-            LISTENER --> RULES
-            MEMORY --> RULES
-            CHART --> RULES
-            LICKS --> RULES
-            RULES --> MODEL
-        end
-        SERVER --> SESSION
-    end
-
-    WJD[("Weimar Jazz Database<br/>make_licks.py, once")]
-    MAIN -- "on / off: your notes" --> SERVER
-    SERVER -- "note, cut, tempo" --> MAIN
-    PANEL -- "set a knob" --> SERVER
-    SERVER -- "state: what it hears and does" --> PANEL
-    SAVED -. "rsync, its memory of you" .-> MEMORY
-    WJD -.-> LICKS
-```
-
-| Block | What it does |
-| --- | --- |
-| [main.py](main.py) | Reads your keyboard and sends each key the moment you press it. Plays the model's notes when they are due (one that arrives too late is skipped, not played out of time), a little softer than you play and shaped as a pianist would; clicks the metronome; records the duo and saves it in `generated/`. |
-| FluidSynth, [sound.py](sound.py) | The sound of both pianos on the laptop: instrument, volume, envelope, reverb, and a delay played as MIDI echoes. |
-| [pianoroll.py](pianoroll.py) | The window: your notes and the model's rising from the keyboard, the tune's chart with the bar you are in, the name of the soloist it is quoting. Without a MIDI keyboard, the laptop's keys play. |
-| [knobs.py](knobs.py) | The panel beside it: presets and a few musical controls, each turning some of the model's knobs; it shows what the model hears and does, four times a second. |
-| [server.py](music_transformer/server.py) | Runs next to the model. Hands your notes to the session, asks it for notes until a second of music is sampled ahead of now, and sends them; tells the laptop to drop (`cut`) those not yet sounded when your playing made the model sample them again. |
-| [duo.py](music_transformer/duo.py) | The duo itself. Your notes and its own are one sequence the model continues; each of its notes is three samples: when, how long, which. Before each sample it masks what may not be (a hand that must wait, a pitch out of its register) and adds a bias to what should be (the chord's tones, your key, the next note of a phrase it quotes). |
-| [listener.py](music_transformer/listener.py) | Hears you as a partner does: your key and when you modulate, the chord under your hands, your pulse, your last phrase. Over a tune, the chart's chords take the place of yours. |
-| [memory.py](music_transformer/memory.py) | Your playing, now and in your saved duos, as a corpus in the manner of Somax2: what you play wakes places in it, and the strongest says what comes next. |
-| [chart.py](music_transformer/chart.py) | A tune from `charts/`: its chords bar by bar, tempo and count-in; who solos now (its `part`), how it plays the changes and divides the beat for the next two bars, where it comps under its own solo. |
-| [licks.py](music_transformer/licks.py), [bebop.py](music_transformer/bebop.py) | The phrases of one to four bars it quotes, filed under the chords they were played over, and how often bebop soloists play each step over each kind of chord. Both come from the Weimar Jazz Database ([make_licks.py](music_transformer/make_licks.py) makes the first). |
-| [amt.py](music_transformer/amt.py), [graphed.py](music_transformer/graphed.py) | The pretrained Anticipatory Music Transformer, fed one token at a time with its cache kept; `graphed.py` replays that step as a CUDA graph, which is what makes a note fast enough. |
-
-Over a tune its hands are three: a walking bass that owes a note on every beat, a right hand that solos or comps as its `part` says, and, under its own solo, a hand that comps a chord now and then.
-
-## Its memory
-
-What you play becomes a corpus, in the manner of [Somax2](https://github.com/DYCI2/Somax2) (written anew from its published model, in [music_transformer/memory.py](music_transformer/memory.py)). Your notes wake peaks in that corpus, on three layers: your line, your harmony, its own line. Peaks move on with time, fade, and add up when they agree, in any key, and the strongest says what comes next and when. AMT plays it, as closely as `recall` asks: at 0 it only invents, at the top it quotes you. It also knows the harmony it expects next.
-
-Silence comes the same way: the rests you play are in the corpus; `silence` leaves slices out; `timeout` is how long it plays on after your last note; with `sparse` on it plays only when it remembers. With nothing to remember it invents, in phrases of about `phrase` notes with a `breath` between them.
-
-`./run_duet.sh` gives it your saved duos in `generated/` (your track of each); by hand, `python -m music_transformer.server --corpus generated`.
+The model is the pretrained [Anticipatory Music Transformer](https://github.com/jthickstun/anticipation) (AMT), on a PC with a GPU; the laptop handles the keyboard, the sound and the piano roll.
 
 ## Run it
 
 ```bash
-./run_duet.sh                      # on the laptop
+./run_duet.sh                                                      # AMT medium on raichu
+SERVER_ARGS="--model ~/models/music-large-800k" ./run_duet.sh      # the large model
+DUET_HOST=other-pc ./run_duet.sh                                   # another GPU host
 ```
 
-`run_duet.sh` restarts everything: it copies the model's code to the PC with the GPU (`DUET_HOST`, raichu by default), then starts the model server there, the SSH tunnel, FluidSynth, `main.py` on the keyboard and the piano roll. Closing the piano roll stops the duo and saves it in `generated/`.
+It copies the model's code to the GPU host, starts the server there, an SSH tunnel, FluidSynth, `main.py` and the piano roll. Closing the piano roll stops the duo and saves it in `generated/`.
 
-### On one machine
+No MIDI keyboard? The laptop's keys play, as in Ableton Live: `A W S E D F T G Y H U J K O L P` from C, `Z`/`X` octave down/up, `C`/`V` softer/louder.
 
-Everything runs on one Linux laptop too. The server downloads the model and picks CUDA, Apple Silicon or the CPU (with the smaller model on the CPU):
+## Two Modes
 
-```bash
-python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m music_transformer.server                    # terminal 1: the model
-fluidsynth -a pipewire -m alsa_seq -i -s /usr/share/sounds/sf2/FluidR3_GM.sf2 &
-aconnect "Midi Through" "FLUID Synth"                            # the duo's sound
-.venv/bin/python main.py                                         # terminal 2: pick your keyboard (Ctrl+C stops and saves)
-.venv/bin/python pianoroll.py                                    # terminal 3: the piano roll and the knobs
-```
+**Free**: no tune. It starts at your first note and follows you. Pick a **Preset** (duet, call & response, it comps, it solos, free) and shape it with the **Character**. It remembers what you played, in this duo and in your saved ones, in the manner of [Somax2](https://github.com/DYCI2/Somax2), and plays it back as much as *memory* says.
 
-No MIDI keyboard? Press Enter in `main.py` instead of picking one, and the laptop's keyboard plays in the piano roll, as in Ableton Live (A W S E D F T G Y H U J K O L P from C, Z and X an octave down and up, C and V softer and louder).
+**Tune**: pick a tune in **Play** and its page appears. **Play** (or the space bar) counts it in, **Stop** silences it; it never starts by itself. Choose its **Part**:
 
-<details>
-<summary>Setup</summary>
+| Part | It plays |
+| --- | --- |
+| **Comps** | a walking bass and chords on each chord's scale, for you to solo |
+| **Solos** | a bebop line over the changes, for you to comp, quoting the great soloists (the `licks` knob) |
+| **Duet** | comps while you play, solos when you rest |
+| **Trade fours** | four bars yours, four bars its own |
 
-- **PC with a GPU**: the repo in `~/Ai-Duet` with a venv (`pip install -r requirements.txt`), the model as safetensors in `~/models/music-medium-800k`, and `ssh raichu` (or your `DUET_HOST`) working with a key.
-- **Laptop**: FluidSynth with FluidR3_GM, and a venv with `pip install mido python-rtmidi pygame imageio-ffmpeg`. A sampled grand at `~/sf2/SalamanderGrandPiano.sf2` ([Salamander Grand Piano](https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html), or another with `SOUNDFONT=path/to.sf2 ./run_duet.sh`) plays the piano over FluidR3_GM's.
-- **Code changes**: `./run_duet.sh` copies `music_transformer/` and `tests/` to the PC. The model's tests need torch: run `python -m unittest tests.test_duo_session tests.test_graphed` there.
-- **Speed**: on CUDA the model feeds each token through a CUDA graph ([music_transformer/graphed.py](music_transformer/graphed.py)), the same GPT-2 about three times sooner than in eager mode.
-- **Logs**: `~/amt_server.log` on the PC; `duet.log`, `fluidsynth.log`, `pianoroll.log` in `/tmp` on the laptop.
+Over a tune it also quotes **you**: each phrase you play is filed under its chords and comes back wherever those chords return, in any key (*memory*: how often; *dialogue*: how much it prefers your last one). Hold a chord that is not the tune's and it follows your reharmonisation (*key follow*: how soon).
 
-</details>
-
-## Piano roll and knobs
+## The controls
 
 ![The piano roll with the knobs](samples/duo/pianoroll-knobs.png)
 
-The top of the piano roll says what the model hears (key, chord, tempo), or over a Tune its title and bar. Keys: F fullscreen, K show or hide the controls, F2 open or close Advanced, the laptop's keyboard is a piano while `main.py` plays (F and K are then its keys: F11 and Tab stand in for them), Esc close.
+| Tab | What is there |
+| --- | --- |
+| **Play** | the Tune and Play/Stop; the Presets (Free) or the Part (Tune); the Character; the octaves |
+| **Sound** | both pianos in FluidSynth: instrument, volume, pan, envelope, reverb, delay |
+| **Advanced** (F2) | every knob of the model that acts now (`KNOBS` in [duo.py](music_transformer/duo.py)) |
 
-Controls are sliders (drag them; hold Shift to drag finely), steppers (click the arrows) and cards (click one). The arrow keys or Ctrl and the wheel over a control turn it; the wheel alone scrolls the panel. A double click resets a control; the bottom of the panel says what the control under the mouse does. Only the controls that act in the Mode it plays in, Free or over a Tune, are shown.
+The **Character** is nine controls, one position for both Modes: density, harmony, role, dialogue, groove, risk, focus, memory, key follow. Only the controls that act in the current Mode are shown; hover one to read what it does.
 
-- **Play**
-  - Tune: off (the Free Mode) or one of the charts below
-  - Free Mode: the Presets **duet**, **call & response**, **it comps** (it plays the harmony, you improvise), **it solos** (you play the harmony, it improvises), **free**; each sets the Character and the Free Mode's texture, never the Part
-  - Over a Tune: the Part, **comps**, **solos**, **duet** or **trade fours**
-  - Character: density, harmony, role, dialogue, groove, risk, focus, memory, key follow, where you left them in either Mode
-  - Octaves: `lowest`, `highest`
-- **Sound**: your piano's and its own: instrument, volume, pan, envelope, reverb and delay, in FluidSynth
-- **Advanced** (F2): the model's knobs that act now, described in `KNOBS` in [music_transformer/duo.py](music_transformer/duo.py), where the defaults are too; among them `root` and `scale`, which force it into a scale instead of your key, and `bpm`, which fixes its tempo, with a `metronome`
+Keys: `Space` play/stop the tune, `F` (or `F11`) fullscreen, `K` (or `Tab`) hide the panel, `F2` Advanced, `Esc` quit.
 
-Knobs and sound are kept in `~/.config/ai-duet/` (the knobs in `knobs.json`: the older `mind.json` is no longer read).
+## Add a tune
 
-## Play a tune from a chart
-
-A jazz buddy to practise with: pick a tune in **Play**, as from a Real Book, and the model plays over its chords bar by bar, round and round. The piano roll shows it as a page of a Real Book, its bars in rows, the one being played lit with its beats.
-
-- `chart`: the tune. Choosing it shows its page; **Play** (or the space bar) starts it after a bar of count-in (the beats to go are shown, large) and **Stop** silences it. It never starts by itself, not even when the duo starts again; `bpm` fixes another tempo than the chart's (the tune carries on from where it is) and `metronome` turns the click off. Its eighths are swung unless the chart says `feel: straight`.
-- `part` (the Part cards), which by itself says what its hands do, whatever the texture knobs (its octaves still hold): comping, chords of three notes or more from F3 to E5 over a walking bass; soloing, a line of single notes from middle C up.
-  - **comps** (it comps): a rhythm section for your solo. It starts by itself when the count-in ends: chords on the chords' scales (C dorian over Cm7 in Bb, D7 with its b9 and b13 in G minor: `CHORD_SCALES` in [music_transformer/listener.py](music_transformer/listener.py)) over a walking bass, a note a beat: the root where a bar or a chord begins, a semitone from the next chord's root on the beat before it, mostly by step in between.
-  - **solos** (it solos): it improvises for you to comp, and starts by itself too. It **quotes** the great soloists, as much as the `licks` knob says (Advanced; 0.4 at first): a phrase one of them played over these same chords, note for note, in the key of the tune and swung as the tune is; the piano roll says whose phrase it is. At 0 it plays its own lines only; at the top one phrase follows another, and nine notes of its solo in ten and more are theirs; in between, that share of its bars is quoted and the model plays the others. A phrase is tied to its chords and not to the form of a tune, and it is one soloist's from end to end: at each bar it comes to with no phrase under way, it looks at the chords of the eight bars that begin there and takes a phrase someone played whole over the first four (a ii-V-I-IV, a I-vi-ii-V, four bars of a blues...), three (a ii-V-I), two or one, wherever in the tune they fall and in any key: of the lengths that were played, the one that leaves the bars after it to the fewest phrases, so that the next begins where a progression does and not in the middle of one. It plays it through, with no breath of its own, and for the next it stays with the same soloist when they played those chords too (`LONGER` and `SAME` in [music_transformer/licks.py](music_transformer/licks.py) say how often). Over the five tunes here, three bars in four of what it quotes and more are in phrases of three or four bars. The phrases are 55,067 licks of one to four bars from 395 solos by 76 players of the [Weimar Jazz Database](https://jazzomat.hfm-weimar.de), from Louis Armstrong and Lester Young to Charlie Parker, Miles Davis, John Coltrane, Sonny Rollins, Clifford Brown and Michael Brecker, filed under their chords and free of any key, in [music_transformer/licks.json.gz](music_transformer/licks.json.gz) (made by [make_licks.py](music_transformer/make_licks.py); like the database, under the ODbL). Its own lines change their way every two bars: as bebop players do (each note over the chord as often as they play it, on the beat and off it, and the next chord's notes in the half beat before it: counted over 132 bebop and hard bop solos of the [Weimar Jazz Database](https://jazzomat.hfm-weimar.de), Charlie Parker's among them, in [music_transformer/bebop.py](music_transformer/bebop.py)), or the chord's scale, its arpeggio, the pentatonic on its root, the blues scale of the tune's key or its major pentatonic, with chromatic approaches to the chord's tones. Its line moves as theirs do, mostly by step, and its rhythm changes every two bars as well: swung eighths, or a run of triplets, sixteenths or thirty-seconds, or out of time (`WAYS` and `FEELS` in [music_transformer/chart.py](music_transformer/chart.py) say how often each).
-  - **duet**: it waits for your first note, comps while you play and solos when you rest. Under its own solo, over its walking bass (here and when it trades fours), it comps too, as a pianist's left hand does: a short chord of three notes from E3 to A4, about one a bar, on one, on the "and" of two, both, pushing the next bar, or none (`STABS` in [music_transformer/chart.py](music_transformer/chart.py) says how often each). Over its bass its right hand is never silent for longer than `max_rest` either: left to choose, the model hears a bass alone and goes on with a bass alone.
-  - **trades** (trade fours): four bars of your solo while it comps, then four of its own.
-- *key follow* (the `stay` knob) says how much it follows your reharmonisations: hold a chord that is not the tune's (three notes or more, one at least outside the written chord and its tensions: B7 over F7) and its chords, its line and its walking bass play over yours until you let it go, then over the tune's again. At **quick** it follows at once; at **steady** never, it plays the written chord whatever you play; in between you must hold your chord longer, over a bar where the control stands at first (`QUICK` and `STEADY` in [music_transformer/listener.py](music_transformer/listener.py)).
-
-While a tune is on it comes before a scale you force.
-
-Charts are text files in [music_transformer/charts/](music_transformer/charts/): Autumn Leaves, All the Things You Are, Misty, Ornithology and a blues in F are there. To add one, write its bars between `|` (`%` repeats the bar before, two chords share a bar), with its title, key and tempo on top, and start the server again:
+Charts are text files in [music_transformer/charts/](music_transformer/charts/) (Autumn Leaves, All the Things You Are, Misty, Ornithology, a blues in F). Bars between `|`, `%` repeats the bar before, chords sharing a bar split it; restart the server:
 
 ```
 title: Autumn Leaves
@@ -167,6 +64,43 @@ bpm: 120
 Cm7 | F7 | Bbmaj7 | Ebmaj7 | Am7b5 | D7 | Gm6 | % |
 ```
 
+Eighths are swung unless the chart says `feel: straight`.
+
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph LAPTOP["Laptop"]
+        KEYS["keyboard"] --> MAIN["main.py<br/>timing, dynamics,<br/>metronome, recording"]
+        MAIN --> SYNTH["FluidSynth"]
+        ROLL["pianoroll.py + knobs.py<br/>piano roll and panel"]
+    end
+    subgraph GPU["PC with a GPU"]
+        SERVER["server.py"] --> SESSION["duo.py<br/>masks and biases on<br/>each sampled note"]
+        SESSION --> MODEL["AMT"]
+        LISTEN["listener.py, memory.py,<br/>chart.py, licks.py"] --> SESSION
+    end
+    MAIN -- "your notes" --> SERVER
+    SERVER -- "its notes" --> MAIN
+    ROLL -- "knobs" --> SERVER
+    SERVER -- "what it hears and does" --> ROLL
+```
+
+Your notes and the model's are one sequence AMT continues, a note at a time (when, how long, which). Before each sample `duo.py` masks what may not be (a hand that must wait, a pitch out of register) and biases what should be (the chord's tones, the next note of a phrase it quotes). The server keeps a second of music sampled ahead and resamples it when you play. On a 3080 Ti a note takes ~12 ms (medium) or ~18 ms (large).
+
+The words used across code and panel are defined in [CONTEXT.md](CONTEXT.md).
+
+<details>
+<summary>Setup and on one machine</summary>
+
+- **GPU host**: the repo in `~/Ai-Duet`, a venv with `pip install -r requirements.txt`, the model in `~/models/music-medium-800k` (and optionally `music-large-800k`), `ssh raichu` (or your `DUET_HOST`) working with a key.
+- **Laptop**: FluidSynth with FluidR3_GM, and a venv with `pip install mido python-rtmidi pygame imageio-ffmpeg`. A sampled grand at `~/sf2/SalamanderGrandPiano.sf2` ([Salamander](https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html), or `SOUNDFONT=path/to.sf2`) plays over FluidR3_GM.
+- **On one machine**: `python -m music_transformer.server` (it downloads the model and picks CUDA, Apple Silicon or the CPU), then FluidSynth (`fluidsynth -a pipewire -m alsa_seq -i -s /usr/share/sounds/sf2/FluidR3_GM.sf2 &` and `aconnect "Midi Through" "FLUID Synth"`), `python main.py` and `python pianoroll.py`.
+- **Tests**: `python -m unittest discover -s tests` (the model's need torch and `anticipation`).
+- **Logs**: `~/amt_server.log` on the GPU host; `duet.log`, `fluidsynth.log`, `pianoroll.log` in `/tmp` on the laptop.
+
+</details>
+
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE): use it, change it and share it freely for anything noncommercial (personal, study, research, education, hobby). Commercial use is not allowed. The model itself is the [Anticipatory Music Transformer](https://github.com/jthickstun/anticipation), under its own license.
+[PolyForm Noncommercial 1.0.0](LICENSE): free for anything noncommercial. The model is the [Anticipatory Music Transformer](https://github.com/jthickstun/anticipation), under its own license. The quoted phrases ([licks.json.gz](music_transformer/licks.json.gz)) and the bebop statistics come from the [Weimar Jazz Database](https://jazzomat.hfm-weimar.de), under the ODbL.
