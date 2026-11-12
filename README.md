@@ -131,7 +131,7 @@ No MIDI keyboard? Press Enter in `main.py` instead of picking one, and the lapto
 
 The top of the piano roll says what the model hears (key, chord, tempo) and what it is doing. Keys: F fullscreen, K show or hide the controls, the laptop's keyboard is a piano while `main.py` plays (F and K are then its keys: F11 and Tab stand in for them), Esc close.
 
-Controls are sliders (drag them; hold Shift to drag finely) and steppers (click the arrows). The arrow keys or Ctrl and the wheel over a control turn it; the wheel alone scrolls the panel. A double click resets a control, and the bottom of the panel says what the control under the mouse does. A control is dimmed while what it shapes is not happening.
+Controls are sliders (drag them; hold Shift to drag finely) and steppers (click the arrows). The arrow keys or Ctrl and the wheel over a control turn it; the wheel alone scrolls the panel. A double click resets a control, and the bottom of the panel says what the control under the mouse does. Of the model's controls, only those that act in the Mode it plays in, free or over a tune, are shown.
 
 - **AI mind**
   - Presets: **duet**, **call & response**, **it comps** (it plays the harmony, you improvise), **it solos** (you play the harmony, it improvises), **free**

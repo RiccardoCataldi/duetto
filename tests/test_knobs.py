@@ -40,8 +40,8 @@ class MindTest(unittest.TestCase):
         self.assertEqual(self.mind.knobs['left_step'].value, 15)
         self.assertEqual({k.name for k in self.sent}, {'min_step', 'space', 'left_step'})
 
-    def test_a_knob_is_dimmed_while_what_it_shapes_is_not_happening(self):
-        self.mind.state = {'mode': 'accompanying', 'key': 'C major', 'chord': 'G7', 'bpm': 92,
+    def test_a_control_acts_while_one_of_its_knobs_does(self):
+        self.mind.state = {'mode': 'free', 'doing': 'accompanying', 'key': 'C major', 'chord': 'G7', 'bpm': 92,
                            'active': ['out_of_key', 'space', 'apart']}
         self.assertTrue(self.mind.active(self.macro('role')))
         self.assertFalse(self.mind.active(self.macro('dialogue')))
@@ -116,7 +116,7 @@ class PanelTest(unittest.TestCase):
     def test_what_the_model_hears_and_does_reads_as_cells(self):
         mind = knobs.Mind(None, os.path.join(self.tmp.name, 'other.json'))
         self.assertIsNone(mind.readout())
-        mind.state = {'mode': 'alone', 'key': 'D minor', 'chord': None, 'bpm': None, 'active': []}
+        mind.state = {'mode': 'free', 'doing': 'alone', 'key': 'D minor', 'chord': None, 'bpm': None, 'active': []}
         self.assertEqual(mind.readout(), [('Key', 'D minor'), ('Chord', '—'), ('Tempo', '—'),
                                           ('AI', 'playing on its own')])
 

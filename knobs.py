@@ -5,7 +5,7 @@ The controls beside the piano roll, in four tabs:
   it into) and its tempo (yours, or one you fix, with a metronome)
 - Your sound, AI sound: yours and the model's in FluidSynth on this laptop (sound.py)
 - Advanced: every knob of the model on its own
-A control is dimmed while what it shapes is not happening (the server says what the model is doing). Drag a slider
+Of the model's controls only those that act in the Mode it plays in are shown (the server says which). Drag a slider
 (Shift: finely), click a stepper's arrows, press the arrow keys or turn the wheel with Ctrl over either; a double click
 puts it back. The wheel scrolls the tab.
 """
@@ -57,10 +57,10 @@ MACROS = [
     ('risk', ('safe', 'adventurous'), "how surprising its choices are",
      {'temperature': (0.7, 1.0, 1.4), 'top_p': (0.85, 0.98, 1.0)}),
     ('focus', ('on you', 'on itself'), "whose playing it builds on: yours, or its own line too",
-     {'memory': (50, 200, 2000)}),
+     {'self_window': (50, 200, 2000)}),
     ('memory', ('invents', 'remembers'), "how much it builds on what you played, and how often it leaves it out to keep silent",
      {'recall': (0.0, 4.0, 10.0), 'silence': (0.0, 0.1, 0.4)}),
-    ('key follow', ('steady', 'quick'), "how soon it follows you into a new key",
+    ('key follow', ('steady', 'quick'), "how soon it follows you: into a new key, or over a tune to a chord you hold",
      {'stay': (0.995, 0.97, 0.85)}),
 ]
 # ways to play together: name, what it does, its musical controls (0 to 1; one left out stands in the middle) and the
@@ -83,7 +83,7 @@ PRESETS = [
      {'harmony': 1.0, 'risk': 1.0, 'groove': 0.0, 'density': 0.75, 'focus': 0.8, 'key follow': 1.0}, {}),
 ]
 PRESET_KNOBS = {name for *_, turns in PRESETS for name in turns}
-MODES = {'listening': 'waiting for you to play', 'accompanying': 'accompanying you', 'answering': 'answering you',
+DOING = {'listening': 'waiting for you to play', 'accompanying': 'accompanying you', 'answering': 'answering you',
          'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn'}
 
 # the sections of the tabs: the model's knobs on the AI mind tab and in Advanced, and each one's sound
@@ -94,7 +94,7 @@ ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'an
             ('Harmony', ('out_of_key', 'chord_tone', 'tension', 'stay')),
             ('Texture', ('chord', 'solo_chord', 'hands', 'no_repeat')),
             ('Role & dialogue', ('apart', 'lead', 'echo')),
-            ('Imagination', ('temperature', 'top_p', 'memory')),
+            ('Imagination', ('temperature', 'top_p', 'self_window')),
             ('Memory of you', ('recall', 'silence', 'sparse', 'decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic',
                                'itself', 'probabilistic')),
             ('Play along', TUNE), ('Range & key', REGISTER)]
@@ -201,7 +201,8 @@ class Mind:
                 for line in lines:
                     if line.strip() == 'ready':
                         break
-                    _, name, value, low, high, default, unit, what = line.split(maxsplit=7)
+                    # its Modes are left out: the state says which knobs act now
+                    _, name, value, low, high, default, unit, _, what = line.split(maxsplit=8)
                     knobs[name] = Knob(name, value, low, high, default, unit.strip('-'), what.strip(),
                                        '.' not in default, self.send)
                 sock.settimeout(None)
@@ -287,7 +288,7 @@ class Mind:
             json.dump(self.saved, f, indent=1)
 
     def active(self, knob):
-        """Whether `knob` shapes the model's notes now."""
+        """Whether `knob` acts now, as the server says: a musical control does when any of its knobs does."""
         if self.state is None:
             return True
         names = self.turns[knob.name] if knob.unit == 'macro' else {knob.name}
@@ -300,7 +301,7 @@ class Mind:
         heard = [self.state[k] for k in ('key', 'chord') if self.state[k]]
         if self.state['bpm']:
             heard.append(f"{self.state['bpm']} bpm")
-        return ' · '.join(heard + [MODES[self.state['mode']]])
+        return ' · '.join(heard + [DOING[self.state['doing']]])
 
     def readout(self):
         """What it hears and does, for the top of the piano roll: (what, as it stands) for your key, your chord, your
@@ -309,7 +310,7 @@ class Mind:
             return None
         state = self.state
         return [('Key', state['key'] or '—'), ('Chord', state['chord'] or '—'),
-                ('Tempo', f"{state['bpm']} bpm" if state['bpm'] else '—'), ('AI', MODES[state['mode']])]
+                ('Tempo', f"{state['bpm']} bpm" if state['bpm'] else '—'), ('AI', DOING[state['doing']])]
 
 
 def sound_knobs(engine, player):
@@ -330,11 +331,11 @@ class Panel:
         self.mind = Mind(address, mind_file)
         self.address = address
         yours, its = sound_knobs(engine, sound.YOU), sound_knobs(engine, sound.AI)
-        # title, colour, its sections (title, knobs) once there are knobs, whether its knobs wait for their moment
-        self.tabs = [('AI mind', AI, self._mind_sections, True),
-                     ('Your sound', YOU, lambda: self._groups(SOUND_GROUPS, {k.name: k for k in yours}), False),
-                     ('AI sound', AI, lambda: self._groups(SOUND_GROUPS, {k.name: k for k in its}), False),
-                     ('Advanced', AI, lambda: self._groups(ADVANCED, self.mind.knobs), True)]
+        # title, colour, its sections (title, knobs) once there are knobs
+        self.tabs = [('AI mind', AI, self._mind_sections),
+                     ('Your sound', YOU, lambda: self._groups(SOUND_GROUPS, {k.name: k for k in yours})),
+                     ('AI sound', AI, lambda: self._groups(SOUND_GROUPS, {k.name: k for k in its})),
+                     ('Advanced', AI, lambda: self._groups(ADVANCED, self._acting()))]
         self.tab = 0
         self.scroll = [0] * len(self.tabs)
         self.held = None          # (knob, x where the drag started, value then, pixels across its range)
@@ -346,14 +347,19 @@ class Panel:
 
     # what each tab holds
 
+    def _acting(self):
+        """The model's knobs that act now: the others are not shown."""
+        return {name: knob for name, knob in self.mind.knobs.items() if self.mind.active(knob)}
+
     def _mind_sections(self):
-        if not self.mind.knobs:
+        knobs = self._acting()
+        if not knobs:
             return None
-        knobs = self.mind.knobs
         tune = (self.mind.state or {}).get('chart')
         return [('Playing style', 'presets'),
                 (f"Play along: {tune['title']}" if tune else 'Play along: no tune', [knobs[n] for n in TUNE if n in knobs]),
-                ('Character', self.mind.macros), ('Range & key', [knobs[n] for n in REGISTER if n in knobs])]
+                ('Character', [macro for macro in self.mind.macros if self.mind.active(macro)]),
+                ('Range & key', [knobs[n] for n in REGISTER if n in knobs])]
 
     def _groups(self, groups, knobs):
         if not knobs:
@@ -389,18 +395,6 @@ class Panel:
             if pair:
                 rows.append(('steppers', pair, STEPPER_H))
         return rows
-
-    def live(self, knob):
-        """Whether `knob` shapes what is played now: the model's wait for their moment, the root of a scale only
-        counts when you force one, the metronome only at a tempo you fix."""
-        if self.tabs[self.tab][3] and not self.mind.active(knob):
-            return False
-        knobs = self.mind.knobs
-        if knob.name == 'root' and 'scale' in knobs:
-            return round(knobs['scale'].value) > 0
-        if knob.name == 'metronome' and 'bpm' in knobs:
-            return round(knobs['bpm'].value) > 0
-        return True
 
     # the mouse and the keys
 
@@ -484,7 +478,7 @@ class Panel:
         self.targets = []
         self._tabs(surface, width)
         self.content = pygame.Rect(0, HEADER_H, width, height - HEADER_H - FOOTER_H)
-        _, accent, sections, _ = self.tabs[self.tab]
+        _, accent, sections = self.tabs[self.tab]
         sections = sections()
         if sections is None:
             self.overflow = 0
@@ -584,30 +578,26 @@ class Panel:
             text(surface, words, 12, MUTED, (PAD, below + i * 17))
 
     def _slider(self, surface, knob, y, accent, width):
-        live = self.live(knob)
         held = self.held is not None and self.held[0] is knob
         over = held or (self.hover is not None and self.hover[1] is knob)
-        colour = accent if live else FAINT
         moved = abs(knob.value - knob.default) > (knob.high - knob.low) / 200
-        text(surface, capital(knob.label()), 14, TEXT if live or over else MUTED, (PAD, y + 6))
+        text(surface, capital(knob.label()), 14, TEXT, (PAD, y + 6))
         value = capital(knob.shown()) if knob.unit == 'macro' else knob.shown()
-        text(surface, value, 13, accent if moved and live else MUTED if live else FAINT, (width - PAD, y + 7),
-             anchor='topright')
+        text(surface, value, 13, accent if moved else MUTED, (width - PAD, y + 7), anchor='topright')
         track = pygame.Rect(PAD + THUMB_R, y + 34, width - 2 * PAD - 2 * THUMB_R, 4)
         pygame.draw.rect(surface, LINE, track, border_radius=2)
         at = track.x + track.width * knob.share()
         home = track.x + track.width * (knob.default - knob.low) / (knob.high - knob.low)
         if abs(at - home) >= 1:   # from where it stands by default to where it is
-            pygame.draw.rect(surface, colour, (round(min(at, home)), track.y, round(abs(at - home)), track.height),
+            pygame.draw.rect(surface, accent, (round(min(at, home)), track.y, round(abs(at - home)), track.height),
                              border_radius=2)
         if 0 < knob.default - knob.low < knob.high - knob.low:
-            pygame.draw.line(surface, MUTED if live else FAINT, (round(home), track.y - 4), (round(home),
-                             track.bottom + 3), 1)
+            pygame.draw.line(surface, MUTED, (round(home), track.y - 4), (round(home), track.bottom + 3), 1)
         r = THUMB_R + (1 if over else 0)
-        pygame.gfxdraw.aacircle(surface, round(at), track.centery, r, TEXT if live else MUTED)
-        pygame.gfxdraw.filled_circle(surface, round(at), track.centery, r, TEXT if live else MUTED)
+        pygame.gfxdraw.aacircle(surface, round(at), track.centery, r, TEXT)
+        pygame.gfxdraw.filled_circle(surface, round(at), track.centery, r, TEXT)
         if over:
-            pygame.gfxdraw.aacircle(surface, round(at), track.centery, r + 3, colour)
+            pygame.gfxdraw.aacircle(surface, round(at), track.centery, r + 3, accent)
         if knob.unit == 'macro':
             text(surface, knob.ends[0], 11, FAINT, (PAD, track.bottom + 10))
             text(surface, knob.ends[1], 11, FAINT, (width - PAD, track.bottom + 10), anchor='topright')
@@ -617,20 +607,18 @@ class Panel:
         each = (width - 2 * PAD - 12) / len(knobs)
         for i, knob in enumerate(knobs):
             x = round(PAD + i * (each + 12))
-            live = self.live(knob)
             over = self.hover is not None and self.hover[1] is knob
-            text(surface, capital(knob.label()), 12, MUTED if live else FAINT, (x, y + 6))
+            text(surface, capital(knob.label()), 12, MUTED, (x, y + 6))
             box = pygame.Rect(x, y + 25, round(each), 34)
             pygame.draw.rect(surface, HOVER if over else RAISED, box, border_radius=8)
             moved = abs(knob.value - knob.default) > 0.01
             value = fit(capital(knob.shown()), 14, box.width - 2 * ARROW_W, moved)
-            text(surface, value, 14, (accent if moved else TEXT) if live else FAINT, box.center, bold=moved,
-                 anchor='center')
+            text(surface, value, 14, accent if moved else TEXT, box.center, bold=moved, anchor='center')
             for side in (-1, 1):
                 end = knob.low if side < 0 else knob.high
                 can = abs(knob.value - end) > 1e-6
                 chevron(surface, (box.x + ARROW_W // 2 if side < 0 else box.right - ARROW_W // 2, box.centery), side,
-                        (TEXT if over else MUTED) if can and live else FAINT)
+                        (TEXT if over else MUTED) if can else FAINT)
             self.targets.append(('stepper', knob, box))
 
     def _footer(self, surface, width, height):
@@ -640,8 +628,6 @@ class Panel:
                                                            ('slider', 'stepper') else None)
         if target is not None:
             title, what = capital(target.label()), self._explain(target)
-            if self.tabs[self.tab][3] and not self.mind.active(target):
-                what += '. It waits for its moment: not in play right now'
         elif self.hover and self.hover[0] == 'preset':
             title, what = capital(self.hover[1][0]), capital(self.hover[1][1])
         else:

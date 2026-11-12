@@ -92,7 +92,7 @@ class DuoSessionTest(unittest.TestCase):
                          [False, False, True, True, False, True, True, False])   # on through the 12 bars' end
         self.session.hear(0.0, 0.3, 53)
         self.clock.t = 4.5 * bar
-        self.assertEqual(self.session.state()['mode'], 'its turn')
+        self.assertEqual(self.session.state()['doing'], 'its turn')
 
     def test_over_a_tune_its_bass_walks_root_first_and_approaches_the_next_chord(self):
         self.session.turn(chart=self.tune('blues_in_f'), part=0)   # F7 | Bb7: a beat is 0.545 s
@@ -458,7 +458,7 @@ class DuoSessionTest(unittest.TestCase):
             self.clock.t += 0.1
             notes = list(self.fill())
             self.assertTrue(all(n[0] <= 2.0 + duo.LOOKAHEAD / 100 + duo.MAX_REST / 100 for n in notes))
-        self.assertEqual(self.session.state()['mode'], 'listening')
+        self.assertEqual(self.session.state()['doing'], 'listening')
         self.assertEqual(list(self.fill()), [])
         self.session.hear(self.clock.t, 0.3, 62)
         self.assertGreater(len(list(self.fill())), 0)
@@ -750,29 +750,34 @@ class DuoSessionTest(unittest.TestCase):
         self.assertTrue(all(60 <= p <= 83 for p in pitches), pitches)
         self.assertEqual(self.session.octaves(), (60, 83))
 
-    def test_it_says_what_it_does_and_which_knobs_are_in_effect_then(self):
-        self.assertEqual(self.session.state()['mode'], 'listening')
+    def test_it_says_what_it_does(self):
+        self.assertEqual(self.session.state()['doing'], 'listening')
         for i, pitch in enumerate((60, 64, 67, 72)):
             self.clock.t = i * 0.25
             self.session.hear(self.clock.t, 0.2, pitch)
-        state = self.session.state()
-        self.assertEqual(state['mode'], 'accompanying')
-        self.assertIn('apart', state['active'])
-        self.assertIn('chord', state['active'])
-        self.assertNotIn('echo', state['active'])
+        self.assertEqual(self.session.state()['doing'], 'accompanying')
         self.clock.t = 2.0
-        state = self.session.state()
-        self.assertEqual(state['mode'], 'answering')
-        self.assertIn('echo', state['active'])
-        self.assertNotIn('apart', state['active'])
-        self.assertIn('lead', state['active'])
+        self.assertEqual(self.session.state()['doing'], 'answering')
         self.clock.t = 10.0
-        self.assertEqual(self.session.state()['mode'], 'alone')
+        self.assertEqual(self.session.state()['doing'], 'alone')
         self.assertEqual(self.session.listener.chord_name({7, 11, 2, 5}), 'G7')
 
+    def test_its_state_lists_only_the_knobs_of_its_mode(self):
+        free_only, tune_only = {'root', 'scale', 'timeout', 'hands', 'silence', 'decay'}, {'part', 'licks'}
+        self.session.turn(scale=1)   # forced into a scale: its root counts
+        state = self.session.state()
+        self.assertEqual(state['mode'], 'free')
+        self.assertLessEqual(free_only, set(state['active']))
+        self.assertFalse(tune_only & set(state['active']))
+        self.session.turn(chart=self.tune('autumn_leaves'))
+        state = self.session.state()
+        self.assertEqual(state['mode'], 'tune')
+        self.assertLessEqual(tune_only | {'recall', 'echo', 'stay', 'self_window'}, set(state['active']))
+        self.assertFalse(free_only & set(state['active']))
+
     def test_knobs_given_at_the_start_hold_from_the_first_note(self):
-        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, memory=60.4, stay=0.9)
-        self.assertEqual(session.memory, 60)
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, self_window=60.4, stay=0.9)
+        self.assertEqual(session.self_window, 60)
         self.assertEqual(session.knobs()['stay'], 0.9)
 
     def test_the_model_remembers_all_of_you_but_only_the_last_moments_of_itself(self):
@@ -785,7 +790,7 @@ class DuoSessionTest(unittest.TestCase):
         yours = [e[2] - NOTE_OFFSET for e in self.session._events() if self.session._instrument(e[2]) == self.session.you]
         self.assertEqual(yours, [60, 62])
         self.assertEqual(self.session.seq[1], TIME_OFFSET)
-        self.assertLessEqual(sum(t < self.session.heard_at - duo.MEMORY for t in mine), duo.PRUNE)
+        self.assertLessEqual(sum(t < self.session.heard_at - duo.SELF_WINDOW for t in mine), duo.PRUNE)
         self.session.play()
         self.assertEqual(self.model.fed, len(self.session.seq) - 1)
 

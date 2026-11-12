@@ -18,7 +18,8 @@ One line per message, times in seconds since the connection opened:
 One duo at a time; a second connection waits for the first to close.
 
 A connection that starts with "knobs" turns the duo's knobs (duo.KNOBS) instead, while a duo plays or before:
-    server -> client   "knob <name> <value> <lowest> <highest> <default> <unit> <what it does>"   one per knob, then "ready"
+    server -> client   "knob <name> <value> <lowest> <highest> <default> <unit> <modes> <what it does>"   one per knob
+                                                         (<modes>: free, tune or free/tune, where it acts), then "ready"
     client -> server   "set <name> <value>"              from the model's next note on, and for the next duos
     server -> client   "state <json>"                    four times a second: DuoSession.state(), what it hears and does
 """
@@ -65,9 +66,9 @@ def amt(model=None, left=None, corpus=None):
 
 
 def make_handler(player):
-    """`player`: its `engine` module (KNOBS, ALWAYS, knob, LOOKAHEAD, MARGIN) and `session(started, **knobs)`."""
+    """`player`: its `engine` module (KNOBS, MODES, acting, knob, LOOKAHEAD, MARGIN) and `session(started, **knobs)`."""
     engine = player.engine
-    KNOBS, ALWAYS, LOOKAHEAD, knob = engine.KNOBS, engine.ALWAYS, engine.LOOKAHEAD, engine.knob
+    KNOBS, LOOKAHEAD, knob = engine.KNOBS, engine.LOOKAHEAD, engine.knob
     lock = threading.Lock()
     knobs = {name: default for name, (default, *_) in KNOBS.items()}   # as last turned, for this duo and the next
     playing = []                                                         # (session, inbox) of the duo now playing
@@ -85,7 +86,8 @@ def make_handler(player):
 
         def turn(self):
             for name, (_, low, high, unit, what) in KNOBS.items():
-                self.wfile.write(f"knob {name} {knobs[name]} {low} {high} {KNOBS[name][0]} {unit or '-'} {what}\n".encode())
+                self.wfile.write(f"knob {name} {knobs[name]} {low} {high} {KNOBS[name][0]} {unit or '-'} "
+                                 f"{'/'.join(engine.MODES[name])} {what}\n".encode())
             self.wfile.write(b"ready\n")
             threading.Thread(target=self.report, daemon=True).start()
             try:
@@ -103,10 +105,11 @@ def make_handler(player):
                 print(f"duo: bad knob ({e})")
 
         def report(self):
-            idle = {'mode': 'listening', 'key': None, 'chord': None, 'bpm': None, 'active': sorted(ALWAYS)}
             while True:
                 try:
-                    state = playing[0][0].state() if playing else idle
+                    # with no duo yet, the knobs as last turned say its Mode
+                    state = playing[0][0].state() if playing else {
+                        **engine.acting(knobs), 'doing': 'listening', 'key': None, 'chord': None, 'bpm': None}
                 except Exception:          # the duo moved on while we read it; the next report will do
                     state = None
                 try:

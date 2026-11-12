@@ -42,7 +42,7 @@ MIN_STEP = 20     # ticks between two of its onsets that are not a chord
 NO_REPEAT = 3     # it may not play again a run of this many pitches it played in its last LINE notes
 LINE = 32
 # it listens to you more than to itself:
-MEMORY = 200      # ticks of its own playing it remembers; all of yours within WINDOW stays
+SELF_WINDOW = 200 # ticks of its own playing it remembers; all of yours within WINDOW stays
 SPACE = 50        # ticks between its onsets while you are playing: it leaves you room
 PLAYING = 100     # ticks after your last note that you still count as playing
 # it listens like a partner (listener.py): your key, your chord, your pulse, your phrases.
@@ -55,7 +55,7 @@ RUN = MAX_REST    # ticks: the longest silence it may leave while it answers; lo
 GRID = 2          # ticks off your pulse that its onsets may land (your beat while you play, your tatum otherwise)
 WINDOW = 2000     # ticks of the duo the model keeps hearing when the context fills up or the clock runs out
 KEEP = 600        # tokens kept at most in that case
-PRUNE = 6         # its notes past MEMORY wait to be this many: forgetting them feeds the whole context again
+PRUNE = 6         # its notes past SELF_WINDOW wait to be this many: forgetting them feeds the whole context again
 # two hands, as a pianist plays: its line over a left hand of its own, another instrument in the context so that
 # the model hears them as two parts. Each hand keeps to its register and its own rhythm; both sound as the model.
 HANDS = 2
@@ -94,7 +94,7 @@ EARLY = 0.15      # beats before a bar line your phrase may begin and still begi
 KNOBS = {
     'min_step': (MIN_STEP, 5, 60, 'ticks', "time between its onsets when you rest"),
     'space': (SPACE, 10, 150, 'ticks', "time between its onsets while you play"),
-    'out_of_key': (OUT_OF_KEY, 0.0, 6.0, '', "how strongly it keeps to your key"),
+    'out_of_key': (OUT_OF_KEY, 0.0, 6.0, '', "how strongly it keeps to your key, or over a tune to the scale of the bar's chord"),
     'chord_tone': (CHORD_TONE, 0.0, 4.0, '', "how much it leans on the chord you play"),
     'tension': (TENSION, 0.0, 4.0, '', "how much it colours your chord with its 9th, 11th and 13th"),
     'chord': (CHORD, 1, 6, 'notes', "most notes it starts at once while you play: its comping"),
@@ -102,15 +102,18 @@ KNOBS = {
     'apart': (APART, 0.0, 6.0, '', "how firmly it keeps apart from your hands, and under your melody, while you play"),
     'lead': (LEAD, 0.0, 6.0, '', "how firmly it takes the melody, up where yours was, when you rest"),
     'answer': (ANSWER, 0, 1000, 'ticks', "how long after your phrase it answers it"),
-    'echo': (ECHO, 0.0, 6.0, '', "how closely its answer follows your intervals"),
+    'echo': (ECHO, 0.0, 6.0, '', "how closely its answer follows your intervals; over a tune, also how often the "
+             "phrase of yours it quotes is your last"),
     'run': (RUN, 5, LONGEST_REST, 'ticks', "the longest silence it may leave while it answers: low, it answers in a run"),
     'grid': (GRID, 0, 20, 'ticks', "how far off your pulse its onsets may land"),
-    'stay': (STAY, 0.80, 0.995, '', "how sure it must be you modulated (lower = sooner)"),
+    'stay': (STAY, 0.80, 0.995, '', "how sure it must be you modulated, or over a tune how long you must hold a chord of "
+             "your own before it follows it (lower = sooner)"),
     'no_repeat': (NO_REPEAT, 2, 8, 'notes', "the length of runs it may not repeat"),
     'phrase': (PHRASE, 2, 64, 'notes', "about how many notes it plays before it takes a breath"),
     'breath': (BREATH, 0, LONGEST_REST, 'ticks', "the silence that ends its phrase"),
     'timeout': (TIMEOUT, 0, NEVER, 'ticks', "how long it plays on after your last note; at the top, for good"),
-    'recall': (4.0, 0.0, EXACT, '', "how closely it follows its memory of you; 0: it only invents, at the top: it quotes"),
+    'recall': (4.0, 0.0, EXACT, '', "how closely it follows its memory of you; 0: it only invents, at the top: it quotes; "
+               "over a tune, how many of the phrases it quotes are yours"),
     'silence': (SILENCE, 0.0, 0.9, '', "how often it leaves out what it remembers and stays silent instead"),
     'sparse': (0, 0, 1, 'choice:off/on', "with nothing to remember: on, it keeps silent; off, it invents"),
     'decay': (30.0, 5.0, 120.0, 's', "how long an idea of where you are lasts unheard"),
@@ -120,9 +123,9 @@ KNOBS = {
     'melodic': (1.0, 0.0, 3.0, '', "how much your line wakes its memory"),
     'harmonic': (1.0, 0.0, 3.0, '', "how much your harmony wakes its memory"),
     'itself': (0.5, 0.0, 3.0, '', "how much its own line wakes its memory"),
-    'probabilistic': (0, 0, 1, 'choice:strongest/by chance', "the memory it follows: always the strongest, or by chance"),
+    'probabilistic': (0, 0, 1, 'choice:strongest/by_chance', "the memory it follows: always the strongest, or by chance"),
     'commit': (COMMIT, MARGIN, LOOKAHEAD, 'ticks', "how far ahead its plan stands when you play: low, it rethinks at every note"),
-    'memory': (MEMORY, 50, 2000, 'ticks', "how much of its own playing it remembers"),
+    'self_window': (SELF_WINDOW, 50, 2000, 'ticks', "how much of its own playing it remembers"),
     'max_rest': (MAX_REST, 50, LONGEST_REST, 'ticks', "the longest silence it may leave"),
     'hands': (HANDS, 1, 2, 'hands', "one hand, a single line; or two: its line over a left hand of its own"),
     'left_step': (LEFT_STEP, 10, 200, 'ticks', "time between its left hand's onsets"),
@@ -136,23 +139,29 @@ KNOBS = {
     'bpm': (0, 0, 240, 'bpm', "the tempo it keeps to, its beats on the metronome's: yours as it hears it, or one you fix"),
     'metronome': (0, 0, 1, 'choice:off/on', "a click on each beat of the tempo you fix"),
     'chart': chart.KNOB(),
-    'licks': (0.4, 0.0, 1.0, '', "over a tune, how much of its solo is phrases of the great soloists, note for note, "
+    'licks': (0.4, 0.0, 1.0, '', "over a tune, how much of its solo is phrases of the great soloists, or yours, note for note, "
               "each over the chords it was played over: 0: none, its own lines only; at the top: one after another"),
     'part': (1, 0, 3, 'choice:comps/duet/solos/trades', "over a tune: it comps, with a walking bass, for you to solo; "
              "duet: it comps while you play and solos when you rest; it solos as a jazz player does, for you to comp; "
              "or you trade fours: four bars of your solo, then four of its own"),
 }
 RECALLED = ('decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic', 'itself', 'probabilistic')   # memory.py's
-# what it is doing, and the knobs that shape its notes then; the others wait for their moment
-IN_EFFECT = {
-    'listening': set(),
-    'accompanying': {'space', 'chord', 'apart', 'commit'},         # you are playing
-    'answering': {'min_step', 'solo_chord', 'lead', 'answer', 'echo', 'run', 'timeout'},   # your phrase just ended
-    'alone': {'min_step', 'solo_chord', 'lead', 'answer', 'timeout'},   # you rest, and it has answered
-}
-ALWAYS = {'out_of_key', 'chord_tone', 'tension', 'stay', 'no_repeat', 'memory', 'max_rest', 'temperature', 'top_p',
-          'lowest', 'highest', 'hands', 'scale', 'bpm', 'chart', 'part', 'licks', 'phrase', 'breath', 'recall', 'silence', 'sparse',
-          *RECALLED}
+# the Modes each knob acts in: these in the Free Mode only, these over a tune only, the others in both
+MODES = {**dict.fromkeys(KNOBS, ('free', 'tune')),
+         **dict.fromkeys(('space', 'solo_chord', 'timeout', 'silence', 'sparse', *RECALLED, 'hands', 'left_step', 'root',
+                          'scale'), ('free',)),
+         **dict.fromkeys(('licks', 'part'), ('tune',))}
+
+
+def acting(knobs):
+    """{'mode', 'active'} with `knobs` as they stand: its Mode, over a tune once one is chosen and free otherwise;
+    and the knobs that act now, those of that Mode but the ones another knob leaves nothing to do."""
+    mode, idle = 'tune' if knobs['chart'] else 'free', set()
+    if mode == 'free':
+        idle = {'stay'} if knobs['scale'] else {'root'}   # forced: your key no longer counts
+        idle |= set() if knobs['bpm'] else {'metronome'}   # a tune has its tempo; free, only the one you fix
+        idle |= set() if knobs['hands'] == 2 else {'left_step'}
+    return {'mode': mode, 'active': sorted(n for n, modes in MODES.items() if mode in modes and n not in idle)}
 
 
 def knob(name, value):
@@ -208,36 +217,31 @@ class DuoSession:
             self.quotes, self.quoted = {}, [0, 0]   # the bars are others
 
     def state(self):
-        """What it hears and what it is doing: {'mode', 'key', 'chord', 'bpm', 'active': the knobs in effect}."""
+        """What it hears and what it is doing: {'mode': free or tune, 'doing', 'key', 'chord', 'bpm', 'active': the
+        knobs that act now}."""
         if self.base is None or self.heard_at is None:
-            return chart.reading(self, {'mode': 'listening', 'key': self.listener.forced_name(), 'chord': None,
-                                        'bpm': self.bpm or None, 'active': sorted(ALWAYS)})
+            return chart.reading(self, {**acting(self.knobs()), 'doing': 'listening',
+                                        'key': self.listener.forced_name(), 'chord': None, 'bpm': self.bpm or None})
         now = self.now()
         at = self._seconds(now)
         if now - self.heard_at < PLAYING:
-            mode = 'accompanying'
+            doing = 'accompanying'
         elif self._timed_out(now):
-            mode = 'listening'
+            doing = 'listening'
         elif now - self.heard_at < self.answer and len(self.listener.phrase(at)) > 1:
-            mode = 'answering'
+            doing = 'answering'
         else:
-            mode = 'alone'
+            doing = 'alone'
         key = self.listener.said_key()
         chord = self.listener.chord(at)
         pulse = self.listener.pulse(at)
-        active = ALWAYS | IN_EFFECT[mode] | ({'grid'} if pulse else set()) | ({'left_step'} if self.hands == 2 else set())
-        active = active - {'stay'} | {'root'} if self.scale else active   # forced: your key no longer counts
-        active |= {'metronome'} if self.bpm else set()
-        if self.chart:   # the tune says the key, the chords and when it plays
-            active = active - {'root', 'scale', 'stay', 'timeout', 'recall', 'silence', 'sparse', *RECALLED} | {
-                'part', 'metronome'}
-            if self.part == 3:
-                mode = 'its turn' if self._solos(at, False) else 'your turn'
+        if self.chart and self.part == 3:
+            doing = 'its turn' if self._solos(at, False) else 'your turn'
         heard = self.listener.name(key) if key is not None else None
         return chart.reading(self, {
-            'mode': mode, 'key': self.listener.forced_name() or heard,
+            **acting(self.knobs()), 'doing': doing, 'key': self.listener.forced_name() or heard,
             'chord': self.listener.chord_label(at) if chord else None,
-            'bpm': round(60 / self.listener.beat(pulse[0])) if pulse else None, 'active': sorted(active)})
+            'bpm': round(60 / self.listener.beat(pulse[0])) if pulse else None})
 
     def begin(self):
         """Over a tune, when it comps or solos for you (not in a duet, where it follows you), it starts by itself as
@@ -304,7 +308,7 @@ class DuoSession:
         # otherwise its own line, two or three times denser than yours, drowns you out
         events = self._events()
         kept = [e for e in events
-                if self._instrument(e[2]) not in self._mine() or e[0] - TIME_OFFSET >= self.heard_at - self.memory]
+                if self._instrument(e[2]) not in self._mine() or e[0] - TIME_OFFSET >= self.heard_at - self.self_window]
         if len(events) - len(kept) >= PRUNE:
             self._restart(kept)
         return cut
