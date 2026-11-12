@@ -2,13 +2,7 @@
 
 [![tests](https://github.com/RiccardoCataldi/duetto/actions/workflows/tests.yml/badge.svg)](https://github.com/RiccardoCataldi/duetto/actions/workflows/tests.yml) [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE)
 
-![You in orange, the model in blue, on the piano roll](samples/duo/duetto.gif)
-
 Play a MIDI keyboard and a transformer plays a second piano with you, in real time. Pick a tune from a Real Book and it plays it with you: walking bass, comping, solos. It listens like a partner: it comps while you play, solos when you rest, answers your phrases and quotes them back.
-
-▶ **[Watch a full improvisation on YouTube](https://www.youtube.com/watch?v=0qvRMhN8qa4)**
-
-https://github.com/user-attachments/assets/41a18857-2421-4c9a-b8b0-83cfdad1ff84
 
 The model is the pretrained [Anticipatory Music Transformer](https://github.com/jthickstun/anticipation) (AMT), on a PC with a GPU; the laptop handles the keyboard, the sound and the piano roll.
 
@@ -38,8 +32,6 @@ Pick a tune in **Play** and its page appears. **Play** (or the space bar) counts
 It also quotes **you**: each phrase you play is filed under its chords and comes back wherever those chords return, in any key (*memory*: how often; *dialogue*: how much it prefers your last one). Between two phrases it quotes it may add a pickup into the next (the `pickup` knob). Hold a chord that is not the tune's and it follows your reharmonisation (*key follow*: how soon).
 
 ## The controls
-
-![The piano roll with the knobs](samples/duo/pianoroll-knobs.png)
 
 | Tab | What is there |
 | --- | --- |
