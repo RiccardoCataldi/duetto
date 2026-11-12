@@ -1,5 +1,4 @@
 import re
-import time
 import rtmidi
 
 
@@ -11,15 +10,7 @@ class Setup(object):
 
     def __init__(self):
         self.__midiin = rtmidi.MidiIn()
-        self.__midiout = rtmidi.MidiOut()
         self.__ports = self.__midiin.get_ports()
-        self.__ports_out = self.__midiout.get_ports()
-
-    def print_lines(self, length, lines):
-        for i in range(1, lines):
-            num = length+(1)
-            print('##'*num)
-            time.sleep(0.2)
 
     def show_ports(self):
         print("These are your detected MIDI devices:", '\n')
@@ -57,21 +48,8 @@ class Setup(object):
         else:
             raise Exception("No midi ports! Maybe open a virtual device?")
 
-    def open_port_out(self, num):
-        print("opened midi out port")
-
-        if self.__ports_out:
-            self.__midiout.open_port(num)
-
     def close_port(self):
         self.__midiin.close_port()
-        #TODO: add close out port too
-
-    def get_message(self):
-        return self.__midiin.get_message()
-
-    def send_message(self, message):
-        return self.__midiout.send_message(message)
 
     def set_callback(self,cb):
         self.__callback = cb
@@ -94,17 +72,6 @@ class Setup(object):
         self.__midiin.set_callback(self.__callback)
         print("Plugged in again:", ports[pnum])
 
-    def get_device_id(self):
-        print("Hit any note to get the device_id.")
-        while True:
-            msg = self.get_message()
-            if msg:
-                message, deltatime = msg
-                if message[0] != 254: #active sense ignore
-                    device_id = message[0]
-                    if device_id:
-                        return device_id
-
     def perform_setup(self):
         self.show_ports()
         myPort = self.get_port_from_user()
@@ -114,29 +81,3 @@ class Setup(object):
         print("Bye bye 🎹\n")
         self.close_port()
         del self.__midiin
-
-def main():
-    codeK = Setup()
-    my_midiport = codeK.perform_setup()
-    codeK.open_port(my_midiport)
-
-    if my_midiport >= 0:
-        print("Showing incoming MIDI messages. Press Control-C to exit.")
-        try:
-            timer = time.time()
-            while True:
-                msg = codeK.get_message()
-
-                if msg:
-                    message, deltatime = msg
-                    print('deltatime: ', deltatime, 'msg: ', message)
-
-                time.sleep(0.01)
-
-        except KeyboardInterrupt:
-            print('')
-        finally:
-            codeK.end()
-
-if __name__ == "__main__":
-    main()

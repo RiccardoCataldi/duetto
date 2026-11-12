@@ -114,11 +114,6 @@ class DuoTest(unittest.TestCase):
         soft = main.dynamics(60, 'right', [60], [], 30, False, random.Random(0))
         self.assertEqual(soft, main.dynamics(60, 'right', [60], [], main.QUIETEST, False, random.Random(0)))
 
-    def test_it_strikes_its_keys_as_hard_as_the_model_says_when_it_says(self):
-        self.duo.receive("note 2.000 0.500 60 right 110\n")
-        self.duo.tick(102.0)
-        self.assertEqual(self.generated_velocities(), {60: 110})
-
     def test_its_line_swells_as_it_rises(self):
         line = [60, 62, 64, 65, 67, 69, 71, 72]
         low = main.dynamics(60, 'right', [60], line, 80, False, random.Random(0))

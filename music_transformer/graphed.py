@@ -1,7 +1,7 @@
 """
 AMT's GPT-2 for one note at a time, fast: its KV cache is a fixed buffer and the step that feeds one token is a CUDA
-graph, replayed with one launch. In eager mode the step is ~200 kernels the CPU launches one by one, and on a
-Jetson that launching, not the GPU, is most of the time a note takes.
+graph, replayed with one launch. In eager mode the step is ~200 kernels the CPU launches one by one, and that
+launching, not the GPU, is most of the time a note takes.
 
 It is called as the Hugging Face model is (model(inp, past_key_values=past, use_cache=True)), for one duo at a time:
 the cache it returns is a length into its buffer, and only the latest one is valid.

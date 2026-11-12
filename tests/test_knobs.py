@@ -55,18 +55,6 @@ class MindTest(unittest.TestCase):
         self.assertEqual((again.saved['knobs']['apart'], again.saved['knobs']['lead']), (4.0, 0.0))
         self.assertEqual(next(m for m in again.macros if m.name == 'role').value, 0.0)
 
-    def test_each_model_keeps_its_own_knobs_and_controls(self):
-        self.macro('density').set(0.0)
-        self.assertEqual(self.mind.knobs['space'].value, 150)
-        self.mind._play('aria')
-        self.assertEqual(self.macro('density').value, 0.5)   # Aria's as you left them: never turned
-        self.macro('density').set(0.0)
-        self.assertEqual(self.mind.knobs['space'].value, 100)   # along Aria's line
-        again = knobs.Mind(None, self.path)
-        self.assertEqual((again.saved['knobs']['space'], again.saved['knobs_aria']['space']), (150, 100))
-        again._play('aria')
-        self.assertEqual(next(m for m in again.macros if m.name == 'density').value, 0.0)
-
     def test_a_knob_you_never_turned_starts_where_its_control_stands(self):
         self.macro('role').set(1.0)                 # leads
         again = knobs.Mind(None, self.path)

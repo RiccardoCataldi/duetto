@@ -3,7 +3,7 @@ mido
 python-rtmidi
 pygame
 imageio-ffmpeg
-# the model's server (on a Jetson, torch comes from NVIDIA: make the venv with --system-site-packages)
+# the model's server
 numpy
 torch>=2.0.1
 transformers>=4.29.2

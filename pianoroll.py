@@ -5,7 +5,7 @@ A piano roll of the duo: your notes and the model's rise from the keyboard as yo
     python pianoroll.py video duo.mid --audio duo.ogg -o duo.mp4
 
 Live, it listens to what main.py sends to FluidSynth on Midi Through: channel 0 is you, channel 1 the model;
-the knobs beside it (knobs.py) turn the model's on the Jetson while you play.
+the knobs beside it (knobs.py) turn the model's on its server while you play.
 """
 import argparse
 import math

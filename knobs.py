@@ -1,6 +1,6 @@
 """
 The controls beside the piano roll, in four tabs:
-- AI mind: presets, ways to play together (it comps while you solo, it solos while you comp...), then a few musical controls (density, harmony, role...), each turning some of the model's knobs on the Jetson
+- AI mind: presets, ways to play together (it comps while you solo, it solos while you comp...), then a few musical controls (density, harmony, role...), each turning some of the model's knobs
   (see music_transformer/server.py, "knobs"), the octaves it may play, the scale it keeps to (yours, or one you force
   it into) and its tempo (yours, or one you fix, with a metronome)
 - Your sound, AI sound: yours and the model's in FluidSynth on this laptop (sound.py)
@@ -35,7 +35,6 @@ ARROW_W = 30              # a stepper's arrows
 THUMB_R = 7
 DRAG = 220                # pixels of drag across a stepper's whole range
 STEPS = 50                # wheel steps across a knob's range
-PITCH_NAMES = ('C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B')   # a key such as the trigger: C2
 DOUBLE_CLICK_S = 0.35
 STEP_KEYS = {pygame.K_LEFT: -1, pygame.K_DOWN: -1, pygame.K_RIGHT: 1, pygame.K_UP: 1}
 MIND_FILE = os.path.expanduser('~/.config/ai-duet/mind.json')   # the model's knobs as last turned
@@ -74,35 +73,18 @@ PRESETS = [
      {'space': 150, 'chord': 1, 'hands': 1, 'echo': 3.0, 'run': 30}),
     ('it comps', "it plays the harmony, low and steady with both hands, and keeps comping when you rest: you improvise",
      {'role': 0.0, 'dialogue': 0.0, 'density': 0.4, 'harmony': 0.4, 'groove': 1.0, 'risk': 0.3, 'key follow': 0.3},
-     {'chord': 4, 'solo_chord': 4, 'hands': 2, 'lowest': 2, 'highest': 4, 'timeout': 6000, 'busy': 8.0, 'part': 0}),
+     {'chord': 4, 'solo_chord': 4, 'hands': 2, 'lowest': 2, 'highest': 4, 'timeout': 6000, 'part': 0}),
     ('it solos', "you play the harmony, it improvises a line over it, up high",
      {'role': 0.85, 'dialogue': 0.3, 'density': 0.8, 'harmony': 0.6, 'groove': 0.7, 'risk': 0.75, 'focus': 0.8},
-     {'chord': 1, 'solo_chord': 1, 'hands': 1, 'lowest': 5, 'highest': 7, 'busy': 8.0, 'part': 2}),
+     {'chord': 1, 'solo_chord': 1, 'hands': 1, 'lowest': 5, 'highest': 7, 'part': 2}),
     ('trade fours', "over a tune: four bars of your solo while it comps, then four of its own, and so on", {},
      {'part': 3}),
     ('free', "outside your key and off your pulse, surprising and dense: free improvisation together",
      {'harmony': 1.0, 'risk': 1.0, 'groove': 0.0, 'density': 0.75, 'focus': 0.8, 'key follow': 1.0}, {}),
-    # the jam_bot's ways (music_transformer/jam.py): the model left free, started again from your last notes
-    ('trade', "jam_bot: you and it take turns of two bars; in its turn it carries on from your last notes", {},
-     {'strategy': 1}),
-    ('follow me', "jam_bot: a moment after each of your gestures it starts again from your last notes, and leads until "
-                  "the next", {}, {'strategy': 2}),
-    ('on cue', "jam_bot: it plays on by itself; a key under C2 makes it start again from your last notes", {},
-     {'strategy': 3}),
 ]
 PRESET_KNOBS = {name for *_, turns in PRESETS for name in turns}
-# the same controls for Aria (music_transformer/aria_duo.py), whose knobs have other defaults and ranges
-ENGINE_TURNS = {'aria': {
-    'density': {'min_step': (40, 0, 0), 'space': (100, 15, 0), 'max_rest': (600, 300, 100), 'phrase': (5, 12, 32),
-                'breath': (300, 150, 50), 'busy': (0.5, 2.0, 8.0)},
-    'harmony': {'out_of_key': (6.0, 4.0, 0.0), 'chord_tone': (2.0, 0.5, 0.0), 'tension': (0.0, 0.5, 2.0)},
-    'dialogue': {'answer': (0, 400, 1000), 'echo': (0.0, 1.5, 4.0), 'follow': (0.0, 1.0, 3.0)},
-    'groove': {'grid': (20, 20, 3)},
-    'key follow': {'stay': (0.99, 0.93, 0.85)},
-    'risk': {'temperature': (0.7, 0.95, 1.3), 'min_p': (0.1, 0.035, 0.0), 'variety': (0.0, 1.5, 4.0)},
-}}
 MODES = {'listening': 'waiting for you to play', 'accompanying': 'accompanying you', 'answering': 'answering you',
-         'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn', 'waiting': 'your turn'}
+         'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn'}
 
 # the sections of the tabs: the model's knobs on the AI mind tab and in Advanced, and each one's sound
 TUNE = ('chart', 'part', 'licks', 'bpm', 'metronome')   # playing along with a tune
@@ -110,12 +92,11 @@ REGISTER = ('lowest', 'highest', 'root', 'scale')
 ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'answer', 'grid', 'phrase', 'breath', 'timeout',
                          'commit')),
             ('Harmony', ('out_of_key', 'chord_tone', 'tension', 'stay')),
-            ('Texture', ('chord', 'solo_chord', 'hands', 'no_repeat', 'busy')),
-            ('Role & dialogue', ('apart', 'lead', 'echo', 'follow')),
-            ('Imagination', ('temperature', 'top_p', 'min_p', 'memory')),
+            ('Texture', ('chord', 'solo_chord', 'hands', 'no_repeat')),
+            ('Role & dialogue', ('apart', 'lead', 'echo')),
+            ('Imagination', ('temperature', 'top_p', 'memory')),
             ('Memory of you', ('recall', 'silence', 'sparse', 'decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic',
                                'itself', 'probabilistic')),
-            ('jam_bot', ('strategy', 'context', 'bars', 'wait', 'lock', 'every', 'trigger')),
             ('Play along', TUNE), ('Range & key', REGISTER)]
 SOUND_GROUPS = [('', ('instrument',)), ('Mix', ('volume', 'pan', 'reverb')),
                 ('Envelope', ('attack', 'decay', 'sustain', 'release')), ('Delay', ('echo', 'delay', 'feedback'))]
@@ -147,10 +128,8 @@ class Knob:
             return self.ends[0] if value < 0.4 else self.ends[1] if value > 0.6 else 'balanced'
         if self.unit == 'ticks':
             return f"{value / 100:.2f} s"
-        if self.unit in ('notes', 'bars'):
+        if self.unit == 'notes':
             return f"{value} {self.unit}"
-        if self.unit == 'pitch':
-            return f"{PITCH_NAMES[value % 12]}{value // 12 - 1}"
         if self.unit == 'program':
             return sound.GM[value]
         if self.unit == 'bpm':
@@ -195,7 +174,6 @@ class Mind:
     def __init__(self, address, path=MIND_FILE):
         self.address, self.path = address, path
         self.knobs = {}           # name -> Knob, once connected
-        self.engine = 'amt'       # the model the server plays: each keeps its own knobs
         self.state = None         # the last DuoSession.state() heard
         self.sock = None
         self.lock = threading.Lock()
@@ -206,7 +184,9 @@ class Mind:
             self.saved = {}
         self.macros = [Knob(label, 0.5, 0, 1, 0.5, 'macro', what, False, self._macro, ends)
                        for label, ends, what, _ in MACROS]
-        self._play('amt')
+        self.turns = {label: turns for label, _, _, turns in MACROS}
+        for macro in self.macros:
+            macro.value = self._saved('macros').get(macro.name, 0.5)
         if address:
             threading.Thread(target=self._connect, daemon=True).start()
 
@@ -221,9 +201,6 @@ class Mind:
                 for line in lines:
                     if line.strip() == 'ready':
                         break
-                    if line.startswith('engine '):
-                        self._play(line.split()[1])
-                        continue
                     _, name, value, low, high, default, unit, what = line.split(maxsplit=7)
                     knobs[name] = Knob(name, value, low, high, default, unit.strip('-'), what.strip(),
                                        '.' not in default, self.send)
@@ -281,8 +258,6 @@ class Mind:
         knob it leaves out stands where its control puts it, or at its default."""
         presets = []
         for name, what, macros, turns in PRESETS:
-            if 'strategy' in turns and ('strategy' not in self.knobs or self.knobs.get('chart') and self.knobs['chart'].value):
-                continue   # one of the jam_bot's ways: this model has none, or a tune is on, which they do not play
             macros = {m.name: macros.get(m.name, 0.5) for m in self.macros}
             free = {n: along(anchors, macros[m]) for m, knobs in self.turns.items() for n, anchors in knobs.items()}
             presets.append((name, what, macros, {n: turns.get(n, free.get(n, self.knobs[n].default))
@@ -302,16 +277,9 @@ class Mind:
         return (all(abs(m.value - macros[m.name]) < 0.01 for m in self.macros) and
                 all(abs(self.knobs[n].value - v) < 0.01 for n, v in turns.items()))
 
-    def _play(self, engine):
-        """The server plays `engine`: its controls, and its knobs and controls as you left them."""
-        self.engine = engine
-        self.turns = {label: ENGINE_TURNS.get(engine, {}).get(label, turns) for label, _, _, turns in MACROS}
-        for macro, (label, *_) in zip(self.macros, MACROS):
-            macro.value = self._saved('macros').get(label, 0.5)
-
     def _saved(self, what):
-        """What you left turned for this engine: 'knobs' or 'macros' (AMT's under those names, as it always was)."""
-        return self.saved.setdefault(what if self.engine == 'amt' else f"{what}_{self.engine}", {})
+        """What you left turned: 'knobs' or 'macros'."""
+        return self.saved.setdefault(what, {})
 
     def _save(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)

@@ -1,12 +1,11 @@
 #!/bin/bash
-# Restart the duet: the model's server on the Jetson (or another machine), SSH tunnel, FluidSynth, main.py and the
+# Restart the duet: the model's server on raichu (or another machine), SSH tunnel, FluidSynth, main.py and the
 # piano roll on the laptop. On another ssh host, with the left hand on a piano in the context, for example:
 #   DUET_HOST=pc SERVER_ARGS="--model ~/models/music-medium-800k --left 0" ./run_duet.sh
-#   DUET_HOST=pc SERVER_ARGS="--engine aria --checkpoint ~/models/aria-medium-gen.safetensors" ./run_duet.sh
 cd "$(dirname "$0")"
 LOG=${LOG_DIR:-/tmp}
-HOST=${DUET_HOST:-jetson}                                            # an ssh host with this repo in ~/Ai-Duet
-SERVER_ARGS=${SERVER_ARGS:---model ~/models/music-medium-800k}       # AMT by default
+HOST=${DUET_HOST:-raichu}                                            # an ssh host with this repo in ~/Ai-Duet
+SERVER_ARGS=${SERVER_ARGS:---model ~/models/music-medium-800k}
 
 # the watcher of the old window first, or it would stop what we start below
 [ -f "$LOG/duet-window.pid" ] && kill "$(cat "$LOG/duet-window.pid")" 2>/dev/null
@@ -17,15 +16,12 @@ pkill -x fluidsynth
 pkill -f "^ssh -N .*-L 8765:localhost:8765"
 sleep 1
 
-# the model's code as it is here: the Jetson does not pull from git
+# the model's code as it is here: the server does not pull from git
 mkdir -p generated
-rsync -a --exclude __pycache__ music_transformer tests jetson_setup.sh generated "$HOST":Ai-Duet/ || echo "could not copy the code to $HOST"
+rsync -a --exclude __pycache__ music_transformer tests generated "$HOST":Ai-Duet/ || echo "could not copy the code to $HOST"
 
-# the clocks at their highest (jetson_setup.sh lets this run without a password), then the model's server
-ssh "$HOST" 'if [ -x /usr/bin/jetson_clocks ]; then
-    sudo -n /usr/bin/jetson_clocks 2>/dev/null || echo "clocks not maxed: run jetson_setup.sh there once"
-  fi
-  pkill -f "^python -u -m music_transformer\.server"; sleep 2
+# the model's server
+ssh "$HOST" 'pkill -f "^python -u -m music_transformer\.server"; sleep 2
   cd ~/Ai-Duet || exit 1
   . .venv/bin/activate
   HF_HUB_OFFLINE=1 setsid nohup python -u -m music_transformer.server --corpus generated '"$SERVER_ARGS"' > ~/amt_server.log 2>&1 < /dev/null &

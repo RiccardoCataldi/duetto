@@ -81,7 +81,7 @@ class Duo:
         self.durations = deque(maxlen=16)
         self.level = 80                # how loud you play
         self.played_at = None          # when you last pressed a key
-        self.pending = []              # the model's notes not started yet: (onset, duration, pitch, hand, velocity)
+        self.pending = []              # the model's notes not started yet: (onset, duration, pitch, hand)
         self.sounding = {}             # pitch -> (onset, offset, velocity) of the model's notes
         self.line = deque(maxlen=CONTOUR_NOTES)   # its right hand's last pitches
         self.late = 0                  # the model's notes that came later than LATE_S, skipped
@@ -131,9 +131,8 @@ class Duo:
         kind, *values = line.split()
         with self.lock:
             if kind == 'note':
-                onset, duration, pitch, *how = values   # its hand, and how hard if the model says (Aria does)
-                hand, velocity = (how + ['right'])[0], int(how[1]) if len(how) > 1 else None
-                self.pending.append((self.started + float(onset), float(duration), int(pitch), hand, velocity))
+                onset, duration, pitch, *how = values   # its hand, if the model says
+                self.pending.append((self.started + float(onset), float(duration), int(pitch), (how + ['right'])[0]))
             elif kind == 'cut':
                 cut = self.started + float(values[0])
                 self.pending = [n for n in self.pending if n[0] < cut]
@@ -152,14 +151,14 @@ class Duo:
             due = [n for n in self.pending if n[0] <= now]
             self.pending = [n for n in self.pending if n[0] > now]
             accompanying = self.played_at is not None and now - self.played_at < 1.0
-            for onset, duration, pitch, hand, given in sorted(due, key=lambda n: n[:3]):
+            for onset, duration, pitch, hand in sorted(due, key=lambda n: n[:3]):
                 if now - onset > LATE_S:
                     self.late += 1
                     continue
                 if pitch in self.sounding:
                     self._release(pitch, now)
                 together = [n[2] for n in due if n[0] == onset and n[3] == hand]
-                velocity = given or dynamics(pitch, hand, together, self.line, self.level, accompanying, self.rng)
+                velocity = dynamics(pitch, hand, together, self.line, self.level, accompanying, self.rng)
                 if hand != 'left':
                     self.line.append(pitch)
                 self.midi_rec.play_midi_message([0x90, pitch, velocity], is_generated=True)
@@ -240,7 +239,7 @@ if __name__ == "__main__":
         codeK.open_port(myPort)
         keyboard = codeK.port_name(myPort)
 
-    midiRec = CK_rec(myPort, 0x90, debug=False)
+    midiRec = CK_rec()
     midiRec.set_input_instrument(INPUT_PROGRAM)
     midiRec.set_generated_instrument(GENERATED_PROGRAM)
     for channel, controls in ((midiRec.input_channel, INPUT_CONTROLS), (midiRec.generated_channel, GENERATED_CONTROLS)):
