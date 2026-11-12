@@ -1,13 +1,12 @@
 """
-The controls beside the piano roll, in four tabs:
-- AI mind: presets, ways to play together (it comps while you solo, it solos while you comp...), then a few musical controls (density, harmony, role...), each turning some of the model's knobs
-  (see music_transformer/server.py, "knobs"), the octaves it may play, the scale it keeps to (yours, or one you force
-  it into) and its tempo (yours, or one you fix, with a metronome)
-- Your sound, AI sound: yours and the model's in FluidSynth on this laptop (sound.py)
-- Advanced: every knob of the model on its own
-Of the model's controls only those that act in the Mode it plays in are shown (the server says which). Drag a slider
-(Shift: finely), click a stepper's arrows, press the arrow keys or turn the wheel with Ctrl over either; a double click
-puts it back. The wheel scrolls the tab.
+The controls beside the piano roll, in two tabs:
+- Play: the Tune, then in the Free Mode the Presets and over a Tune the Part it plays; the Character (density,
+  harmony, role...), each control turning some of the model's Knobs (see music_transformer/server.py, "knobs"); the
+  octaves it may play
+- Sound: your piano's and its own in FluidSynth on this laptop (sound.py)
+F2 opens Advanced: the Knobs that act in the Mode it plays in, each on its own (the server says which act). Drag a
+slider (Shift: finely), click a stepper's arrows, press the arrow keys or turn the wheel with Ctrl over either; a
+double click puts it back. The wheel scrolls the tab.
 """
 import json
 import math
@@ -30,14 +29,15 @@ TITLE_H = 40              # a section's title
 SLIDER_H = 52
 MACRO_H = 66              # a musical control: a slider with its two ends under it
 STEPPER_H = 70
-CARD_H = 40               # a preset
+CARD_H = 40               # a Preset, a Part
 ARROW_W = 30              # a stepper's arrows
 THUMB_R = 7
 DRAG = 220                # pixels of drag across a stepper's whole range
 STEPS = 50                # wheel steps across a knob's range
 DOUBLE_CLICK_S = 0.35
 STEP_KEYS = {pygame.K_LEFT: -1, pygame.K_DOWN: -1, pygame.K_RIGHT: 1, pygame.K_UP: 1}
-MIND_FILE = os.path.expanduser('~/.config/ai-duet/mind.json')   # the model's knobs as last turned
+# the model's knobs as last turned; mind.json, from before the Modes, is left as it was and never read
+MIND_FILE = os.path.expanduser('~/.config/ai-duet/knobs.json')
 
 # the musical controls: label, its two ends, what it does, and the model's knobs it turns, each at (0, middle, 1);
 # the middle is the duo's default
@@ -63,8 +63,9 @@ MACROS = [
     ('key follow', ('steady', 'quick'), "how soon it follows you: into a new key, or over a tune to a chord you hold",
      {'stay': (0.995, 0.97, 0.85)}),
 ]
-# ways to play together: name, what it does, its musical controls (0 to 1; one left out stands in the middle) and the
-# model's knobs it sets (one any other preset sets and it leaves out goes back to its default)
+# the Presets, of the Free Mode: name, what it does, its musical controls (0 to 1; one left out stands in the middle)
+# and the Free Mode's knobs it sets (one any other preset sets and it leaves out goes back to its default), never
+# the Part or a Tune's
 PRESETS = [
     ('duet', "the duo's defaults: it comps while you play, answers your phrases, breathes and plays on for a while when you rest", {}, {}),
     ('call & response', "it keeps quiet while you play, then answers each phrase at once with a run built on your "
@@ -73,22 +74,21 @@ PRESETS = [
      {'space': 150, 'chord': 1, 'hands': 1, 'echo': 3.0, 'run': 30}),
     ('it comps', "it plays the harmony, low and steady with both hands, and keeps comping when you rest: you improvise",
      {'role': 0.0, 'dialogue': 0.0, 'density': 0.4, 'harmony': 0.4, 'groove': 1.0, 'risk': 0.3, 'key follow': 0.3},
-     {'chord': 4, 'solo_chord': 4, 'hands': 2, 'lowest': 2, 'highest': 4, 'timeout': 6000, 'part': 0}),
+     {'chord': 4, 'solo_chord': 4, 'hands': 2, 'lowest': 2, 'highest': 4, 'timeout': 6000}),
     ('it solos', "you play the harmony, it improvises a line over it, up high",
      {'role': 0.85, 'dialogue': 0.3, 'density': 0.8, 'harmony': 0.6, 'groove': 0.7, 'risk': 0.75, 'focus': 0.8},
-     {'chord': 1, 'solo_chord': 1, 'hands': 1, 'lowest': 5, 'highest': 7, 'part': 2}),
-    ('trade fours', "over a tune: four bars of your solo while it comps, then four of its own, and so on", {},
-     {'part': 3}),
+     {'chord': 1, 'solo_chord': 1, 'hands': 1, 'lowest': 5, 'highest': 7}),
     ('free', "outside your key and off your pulse, surprising and dense: free improvisation together",
      {'harmony': 1.0, 'risk': 1.0, 'groove': 0.0, 'density': 0.75, 'focus': 0.8, 'key follow': 1.0}, {}),
 ]
 PRESET_KNOBS = {name for *_, turns in PRESETS for name in turns}
-DOING = {'listening': 'waiting for you to play', 'accompanying': 'accompanying you', 'answering': 'answering you',
-         'alone': 'playing on its own', 'your turn': 'your turn', 'its turn': 'its turn'}
+# the Parts over a Tune, in the place of the Presets: name, the value of the knob `part`, what it plays
+PARTS = [('comps', 0, "it comps, with a walking bass, for you to solo"),
+         ('solos', 2, "it solos as a jazz player does, for you to comp"),
+         ('duet', 1, "it comps while you play and solos when you rest"),
+         ('trade fours', 3, "four bars of your solo, then four of its own")]
 
-# the sections of the tabs: the model's knobs on the AI mind tab and in Advanced, and each one's sound
-TUNE = ('chart', 'part', 'licks', 'bpm', 'metronome')   # playing along with a tune
-REGISTER = ('lowest', 'highest', 'root', 'scale')
+# the sections of Advanced, and of each piano's sound
 ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'answer', 'grid', 'phrase', 'breath', 'timeout',
                          'commit')),
             ('Harmony', ('out_of_key', 'chord_tone', 'tension', 'stay')),
@@ -97,8 +97,9 @@ ADVANCED = [('Timing', ('min_step', 'space', 'max_rest', 'run', 'left_step', 'an
             ('Imagination', ('temperature', 'top_p', 'self_window')),
             ('Memory of you', ('recall', 'silence', 'sparse', 'decay', 'least', 'continuity', 'jump', 'melodic', 'harmonic',
                                'itself', 'probabilistic')),
-            ('Play along', TUNE), ('Range & key', REGISTER)]
-SOUND_GROUPS = [('', ('instrument',)), ('Mix', ('volume', 'pan', 'reverb')),
+            ('Tune', ('chart', 'part', 'licks', 'bpm', 'metronome')),
+            ('Range & key', ('lowest', 'highest', 'root', 'scale'))]
+SOUND_GROUPS = [('Mix', ('volume', 'pan', 'reverb')),
                 ('Envelope', ('attack', 'decay', 'sustain', 'release')), ('Delay', ('echo', 'delay', 'feedback'))]
 
 
@@ -154,7 +155,7 @@ class Knob:
         return f"{value:.3f}" if self.high - self.low < 0.5 else f"{value:.2f}"
 
     def label(self):
-        return self.name.replace('_', ' ')
+        return 'tune' if self.name == 'chart' else self.name.replace('_', ' ')
 
     def share(self):
         return (self.value - self.low) / (self.high - self.low)
@@ -294,23 +295,14 @@ class Mind:
         names = self.turns[knob.name] if knob.unit == 'macro' else {knob.name}
         return bool(set(names) & set(self.state['active']))
 
-    def status(self):
-        """What it hears and does, e.g. 'C major · G7 · 92 bpm · accompanying you'."""
-        if self.state is None:
-            return None
-        heard = [self.state[k] for k in ('key', 'chord') if self.state[k]]
-        if self.state['bpm']:
-            heard.append(f"{self.state['bpm']} bpm")
-        return ' · '.join(heard + [DOING[self.state['doing']]])
-
     def readout(self):
-        """What it hears and does, for the top of the piano roll: (what, as it stands) for your key, your chord, your
-        tempo and what it is doing; None while it is not connected."""
+        """What it hears, for the top of the piano roll: (what, as it stands) for your key, your chord and your tempo,
+        over a Tune its title and bar for the key; None while it is not connected."""
         if self.state is None:
             return None
         state = self.state
         return [('Key', state['key'] or '—'), ('Chord', state['chord'] or '—'),
-                ('Tempo', f"{state['bpm']} bpm" if state['bpm'] else '—'), ('AI', DOING[state['doing']])]
+                ('Tempo', f"{state['bpm']} bpm" if state['bpm'] else '—')]
 
 
 def sound_knobs(engine, player):
@@ -331,12 +323,14 @@ class Panel:
         self.mind = Mind(address, mind_file)
         self.address = address
         yours, its = sound_knobs(engine, sound.YOU), sound_knobs(engine, sound.AI)
-        # title, colour, its sections (title, knobs) once there are knobs
-        self.tabs = [('AI mind', AI, self._mind_sections),
-                     ('Your sound', YOU, lambda: self._groups(SOUND_GROUPS, {k.name: k for k in yours})),
-                     ('AI sound', AI, lambda: self._groups(SOUND_GROUPS, {k.name: k for k in its})),
+        # title, colour, its sections (title, knobs or cards) once there are knobs; Advanced only while F2 shows it
+        self.tabs = [('Play', AI, self._play_sections),
+                     ('Sound', YOU, lambda: self._groups([('Your piano', ('instrument',)), *SOUND_GROUPS],
+                                                         {k.name: k for k in yours}) +
+                                            self._groups([('Its piano', ('instrument',)), *SOUND_GROUPS],
+                                                         {k.name: k for k in its})),
                      ('Advanced', AI, lambda: self._groups(ADVANCED, self._acting()))]
-        self.tab = 0
+        self.tab, self.advanced = 0, False
         self.scroll = [0] * len(self.tabs)
         self.held = None          # (knob, x where the drag started, value then, pixels across its range)
         self.hover = None         # the target under the mouse: (kind, what, rect)
@@ -351,15 +345,20 @@ class Panel:
         """The model's knobs that act now: the others are not shown."""
         return {name: knob for name, knob in self.mind.knobs.items() if self.mind.active(knob)}
 
-    def _mind_sections(self):
+    def _play_sections(self):
         knobs = self._acting()
         if not knobs:
             return None
-        tune = (self.mind.state or {}).get('chart')
-        return [('Playing style', 'presets'),
-                (f"Play along: {tune['title']}" if tune else 'Play along: no tune', [knobs[n] for n in TUNE if n in knobs]),
+        if 'part' in knobs:   # over a Tune
+            part = knobs['part']
+            cards = ('Part', [(name, what, part.value == value, lambda value=value: part.set(value))
+                              for name, value, what in PARTS])
+        else:
+            cards = ('Presets', [(preset[0], preset[1], self.mind.playing(preset),
+                                  lambda preset=preset: self.mind.play(preset)) for preset in self.mind.presets()])
+        return [('', [knobs['chart']]), cards,
                 ('Character', [macro for macro in self.mind.macros if self.mind.active(macro)]),
-                ('Range & key', [knobs[n] for n in REGISTER if n in knobs])]
+                ('Octaves', [knobs[n] for n in ('lowest', 'highest') if n in knobs])]
 
     def _groups(self, groups, knobs):
         if not knobs:
@@ -375,9 +374,8 @@ class Panel:
         rows = []
         for title, knobs in sections:
             rows.append(('title', title, TITLE_H if title else 12))
-            if knobs == 'presets':
-                lines = math.ceil(len(self.mind.presets()) / 2)
-                rows.append(('presets', None, lines * (CARD_H + 8) + 44))
+            if knobs and isinstance(knobs[0], tuple):   # cards: (name, what, chosen, choose)
+                rows.append(('cards', knobs, math.ceil(len(knobs) / 2) * (CARD_H + 8)))
                 continue
             pair = []
             for knob in knobs:
@@ -410,7 +408,10 @@ class Panel:
                 self._scroll(-event.y * 48)
             return
         if event.type == pygame.KEYDOWN:
-            if self.hover and self.hover[0] in ('slider', 'stepper') and event.key in STEP_KEYS:
+            if event.key == pygame.K_F2:   # no key of the laptop's piano
+                self.advanced = not self.advanced
+                self.tab, self.hover, self.held = 2 if self.advanced else 0, None, None
+            elif self.hover and self.hover[0] in ('slider', 'stepper') and event.key in STEP_KEYS:
                 knob = self.hover[1]
                 knob.set(knob.value + STEP_KEYS[event.key] * knob.step())
             elif event.key in (pygame.K_PAGEUP, pygame.K_PAGEDOWN):
@@ -438,8 +439,8 @@ class Panel:
         if kind == 'tab':
             self.tab, self.hover, self.held = what, None, None
             return
-        if kind == 'preset':
-            self.mind.play(what)
+        if kind == 'card':
+            what[3]()
             return
         knob = what
         if kind == 'stepper' and pos[0] < rect.x + ARROW_W:
@@ -490,8 +491,9 @@ class Panel:
     def _tabs(self, surface, width):
         well = pygame.Rect(PAD, 18, width - 2 * PAD, 34)
         pygame.draw.rect(surface, RAISED, well, border_radius=10)
-        each = well.width / len(self.tabs)
-        for i, (title, accent, *_) in enumerate(self.tabs):
+        tabs = self.tabs if self.advanced else self.tabs[:2]
+        each = well.width / len(tabs)
+        for i, (title, accent, *_) in enumerate(tabs):
             rect = pygame.Rect(round(well.x + i * each) + 3, well.y + 3, round(each) - 6, well.height - 6)
             chosen = i == self.tab
             if chosen:
@@ -524,12 +526,14 @@ class Panel:
             if y + h > self.content.y and y < self.content.bottom:
                 if kind == 'title':
                     text(surface, what.upper(), 11, MUTED, (PAD, y + h - 20), bold=True)
-                elif kind == 'presets':
-                    self._presets(surface, y, accent, width)
+                elif kind == 'cards':
+                    self._cards(surface, what, y, accent, width)
                 elif kind == 'slider':
                     self._slider(surface, what, y, accent, width)
                 else:
                     self._steppers(surface, what, y, accent, width)
+            if kind == 'title':   # the Sound tab's pianos, each in its player's colour
+                accent = {'Your piano': YOU, 'Its piano': AI}.get(what, accent)
             y += h
         surface.set_clip(None)
         if self.overflow:
@@ -549,33 +553,20 @@ class Panel:
         y = track.y + (track.height - h) * self.scroll[self.tab] / self.overflow
         pygame.draw.rect(surface, LINE, (width - 7, round(y), 3, round(h)), border_radius=2)
 
-    def _presets(self, surface, y, accent, width):
+    def _cards(self, surface, cards, y, accent, width):
         each = (width - 2 * PAD - 8) / 2
-        shown = None
-        for i, preset in enumerate(self.mind.presets()):
+        for i, card in enumerate(cards):
+            name, _, chosen, _ = card
             rect = pygame.Rect(round(PAD + (i % 2) * (each + 8)), y + (i // 2) * (CARD_H + 8), round(each), CARD_H)
-            playing = self.mind.playing(preset)
-            over = self.hover is not None and self.hover[0] == 'preset' and self.hover[1][0] == preset[0]
-            if playing:
+            over = self.hover is not None and self.hover[0] == 'card' and self.hover[1][0] == name
+            if chosen:
                 pygame.draw.rect(surface, mix(accent, SURFACE, 0.8), rect, border_radius=10)
                 pygame.draw.rect(surface, accent, rect, 1, border_radius=10)
-                shown = shown or preset
             else:
                 pygame.draw.rect(surface, HOVER if over else RAISED, rect, border_radius=10)
-            text(surface, fit(capital(preset[0]), 14, rect.width - 16, playing), 14, TEXT if playing or over else
-                 MUTED, rect.center, bold=playing, anchor='center')
-            self.targets.append(('preset', preset, rect))
-        lines = math.ceil(len(self.mind.presets()) / 2)
-        below = y + lines * (CARD_H + 8) + 2
-        if shown is None:
-            line = 'Your own mix: pick a style to start again from one'
-        else:
-            line = shown[1]
-        lines = wrap(capital(line), 12, width - 2 * PAD)
-        if len(lines) > 2:
-            lines = [lines[0], fit(' '.join(lines[1:]), 12, width - 2 * PAD)]
-        for i, words in enumerate(lines):
-            text(surface, words, 12, MUTED, (PAD, below + i * 17))
+            text(surface, fit(capital(name), 14, rect.width - 16, chosen), 14, TEXT if chosen or over else MUTED,
+                 rect.center, bold=chosen, anchor='center')
+            self.targets.append(('card', card, rect))
 
     def _slider(self, surface, knob, y, accent, width):
         held = self.held is not None and self.held[0] is knob
@@ -628,12 +619,10 @@ class Panel:
                                                            ('slider', 'stepper') else None)
         if target is not None:
             title, what = capital(target.label()), self._explain(target)
-        elif self.hover and self.hover[0] == 'preset':
+        elif self.hover and self.hover[0] == 'card':
             title, what = capital(self.hover[1][0]), capital(self.hover[1][1])
         else:
-            text(surface, 'Drag, Ctrl+scroll or use the arrow keys on a control', 12, MUTED, (PAD, y + 18))
-            text(surface, 'Shift: finely  ·  double click: back to its default', 12, MUTED, (PAD, y + 36))
-            text(surface, 'F fullscreen  ·  K hide the panel  ·  Esc quit', 12, FAINT, (PAD, y + 62))
+            text(surface, f"F2: {'close' if self.advanced else 'open'} Advanced", 12, FAINT, (PAD, height - 30))
             return
         text(surface, title, 14, TEXT, (PAD, y + 14), bold=True)
         for i, line in enumerate(wrap(what, 12, width - 2 * PAD)[:3]):

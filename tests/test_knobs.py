@@ -47,7 +47,6 @@ class MindTest(unittest.TestCase):
         self.assertFalse(self.mind.active(self.macro('dialogue')))
         self.assertTrue(self.mind.active(self.mind.knobs['space']))
         self.assertFalse(self.mind.active(self.mind.knobs['echo']))
-        self.assertEqual(self.mind.status(), 'C major · G7 · 92 bpm · accompanying you')
 
     def test_what_you_turn_is_kept_for_next_time(self):
         self.macro('role').set(0.0)
@@ -79,6 +78,15 @@ class MindTest(unittest.TestCase):
         self.mind.play(presets['duet'])
         self.assertEqual(self.mind.knobs['space'].value, 50)
         self.assertTrue(all(m.value == 0.5 for m in self.mind.macros))
+
+    def test_a_preset_leaves_the_part_and_the_tune_as_they_were(self):
+        for name, value, high in (('part', 3, 3), ('chart', 2, 9)):
+            self.mind.knobs[name] = knobs.Knob(name, value, 0, high, 1 if name == 'part' else 0, 'choice:', '', True,
+                                               self.mind.send)
+        for preset in self.mind.presets():
+            self.mind.play(preset)
+        self.assertEqual((self.mind.knobs['part'].value, self.mind.knobs['chart'].value), (3, 2))
+        self.assertNotIn('part', self.mind.saved.get('knobs', {}))
 
     def test_a_choice_shows_its_name(self):
         scale = knobs.Knob('scale', 3, 0, 3, 0, 'choice:yours/major/natural_minor/harmonic_minor', '', True, print)
@@ -117,8 +125,7 @@ class PanelTest(unittest.TestCase):
         mind = knobs.Mind(None, os.path.join(self.tmp.name, 'other.json'))
         self.assertIsNone(mind.readout())
         mind.state = {'mode': 'free', 'doing': 'alone', 'key': 'D minor', 'chord': None, 'bpm': None, 'active': []}
-        self.assertEqual(mind.readout(), [('Key', 'D minor'), ('Chord', '—'), ('Tempo', '—'),
-                                          ('AI', 'playing on its own')])
+        self.assertEqual(mind.readout(), [('Key', 'D minor'), ('Chord', '—'), ('Tempo', '—')])
 
     def test_a_steppers_arrows_step_it(self):
         box = self.target('stepper', 'instrument')

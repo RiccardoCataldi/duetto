@@ -28,7 +28,7 @@ KEYBOARD_H = 120
 SPEED = 140               # pixels a second the notes rise
 TAIL_S = 5                # seconds the video goes on after the last note, while the reverb dies away
 
-HEADER_H = 96            # the players, what the model hears and does, and the time, over the notes' fade
+HEADER_H = 96            # the players, what the model hears, and the time, over the notes' fade
 
 BACKGROUND = theme.BACKGROUND
 WHITE_KEY = (232, 234, 240)
@@ -118,8 +118,7 @@ class Roll:
             self.fade.fill((*BACKGROUND[0], alpha), pygame.Rect(0, y, width, 1))
         self.glow = {c: glow_sprite(colour) for c, (_, _, colour) in PLAYERS.items()}
         self.instruments = {}     # channel -> the instrument it plays, if not PLAYERS'
-        self.ai_range = None      # (lowest, highest) pitch the model may play, shown above the keyboard
-        self.readout = None       # what the model hears and does, shown at the top: (what, as it stands)
+        self.readout = None       # what the model hears, shown at the top: (what, as it stands)
         self.chart = None         # the tune it plays over: {'title', 'bars': [[chord, ...], ...], 'bar', 'beat'}
         self.offline = None       # or why it cannot say
         self.hint = None          # a key to press, in the corner
@@ -156,25 +155,11 @@ class Roll:
                 screen.blit(sprite, (round(x + w / 2 - sprite.get_width() / 2), top - sprite.get_height() // 2),
                             special_flags=pygame.BLEND_ADD)
         screen.blit(self.fade, (0, 0))
-        self._range(screen, top)
         self.keyboard.draw(screen, lit)
         self.keyboard.finish(screen)
         self._header(screen, clock)
         if self.chart:
             self._chart(screen)
-
-    def _range(self, screen, top):
-        """A line in the model's colour over the keys it may play, when it may not play them all."""
-        if self.ai_range is None:
-            return
-        keys = self.keyboard.x
-        low, high = max(self.ai_range[0], min(keys)), min(self.ai_range[1], max(keys))
-        if low > high or (low == min(keys) and high == max(keys)):
-            return
-        left = keys[low][0]
-        right = keys[high][0] + keys[high][1]
-        pygame.draw.line(screen, AI, (round(left) + 2, top - 6), (round(right) - 2, top - 6), 3)
-        theme.text(screen, 'AI range', 11, AI, (round(left) + 4, top - 10), anchor='bottomleft')
 
     def _header(self, screen, clock):
         screen.blit(self.header, (0, 0))
@@ -242,11 +227,11 @@ class Roll:
             pygame.draw.line(screen, MUTED, (x, y + 4), (x, y + cell_h - 5), 1 if x < end - 1 else 2)
 
     def _readout(self, screen, left, right):
-        """Your key, chord and tempo, and what the model is doing, as cells across the middle, as many as fit."""
+        """Your key, chord and tempo, or the Tune and its bar, as cells across the middle, as many as fit."""
         cells = []
         for caption, value in self.readout:
             value = theme.capital(value)
-            cells.append((caption.upper(), value, max(theme.width(value, 17, True), 64) + (16 if caption == 'AI' else 0)))
+            cells.append((caption.upper(), value, max(theme.width(value, 17, True), 64)))
         gap = 36
         while cells and sum(w for *_, w in cells) + gap * (len(cells) - 1) > right - left:
             cells.pop(0)
@@ -256,14 +241,7 @@ class Roll:
             if i:
                 pygame.draw.line(screen, theme.LINE, (x - gap // 2, 22), (x - gap // 2, 52))
             theme.text(screen, caption, 10, MUTED, (x, 19), bold=True)
-            at = x
-            if caption == 'AI':
-                waiting = value.startswith('Waiting')
-                pulse = 0.5 + 0.5 * math.sin(time.monotonic() * 5)
-                pygame.draw.circle(screen, FAINT if waiting else mix(AI, (255, 255, 255), 0.3 * pulse), (x + 4, 44),
-                                   4)
-                at += 16
-            theme.text(screen, value, 17, AI if caption == 'AI' else TEXT, (at, 33), bold=True)
+            theme.text(screen, value, 17, TEXT, (x, 33), bold=True)
             x += w + gap
 
 
@@ -430,10 +408,6 @@ def live(port_name, server):
         roll.chart = (panel.mind.state or {}).get('chart')
         roll.offline = None if panel.mind.knobs else 'Connecting to the model…'
         roll.hint = typing.says() if typed else None if shown else 'K: show the controls'
-        mind = {name: round(knob.value) for name, knob in panel.mind.knobs.items() if name in ('lowest', 'highest')}
-        if len(mind) == 2:
-            low, high = sorted(mind.values())
-            roll.ai_range = (12 * (low + 1), 12 * (high + 1) + 11)
         roll.draw(view, [tuple(n) for n in heard.visible(now, view.get_height())], now, now - started)
         if side.width:
             panel.draw(screen.subsurface(side))
