@@ -89,6 +89,7 @@ STAB = 3          # their notes
 LATE = 6          # ticks: a note of a phrase it quotes may be this late and still be played
 WALK = 4.0        # logit added to the root where its walking bass begins a bar or a chord
 BOSSA = (0, 1.5, 2, 3.5)   # beats of the bar its bass plays on over a bossa: 1, the and of 2, 3, the and of 4
+LEGATO = 0.75     # how often its bass over a bossa holds a note until the next; the others last half as long
 EARLY = 0.15      # beats before a bar line your phrase may begin and still begin at it: you rushed, it is no upbeat
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does
@@ -460,6 +461,8 @@ class DuoSession:
                                                                        instrument == self.comp)
             token = int(torch.multinomial(torch.softmax(nucleus(logits + mask, self.top_p), -1), 1))
             self.seq.append(token)
+        if self._bossa() and self._instrument(self.seq[-1]) == self.left:
+            self._tie()
         return self._played()
 
     def _stab(self, earliest):
@@ -637,6 +640,8 @@ class DuoSession:
         hand; `comps`: the hand that comps under its solo over a tune, neither): your chord and key; where it plays
         against you (_register); after your phrase, its answer."""
         at, you_play = self._seconds(tick), tick - self.heard_at < PLAYING
+        if self._bossa() and not right and not comps:   # its bass keeps to its figure's notes
+            return self._bossa_bass(at, line).to(self.device)
         in_key = self.listener.in_key()
         expected = self.mind.expect(at)[0] if self.recall and not self.chart else None   # the harmony it remembers comes next, not yours now
         chord_tone = max(self.chord_tone, chart.CHANGES) if self.chart else self.chord_tone
@@ -744,6 +749,39 @@ class DuoSession:
                     for at_, (_, lasts, pitch) in zip(at, phrase)]])
             self.learned, phrase = note[0], []
 
+    def _bossa_bass(self, at, line):
+        """Logits for its bass's pitches over a bossa, in place of the listener's: the chord's tones, the others
+        out. On 1 and where the chord changes, its root; on the and of 2 and on 3, its fifth, or now and then its third
+        or seventh; on the and of 4 the next bar's root ahead of it, or now and then a semitone from it."""
+        beat = 60 / self.pace
+        place = chart.beats(self, at) % chart.BEATS
+        root, kind, tones = self.listener.harmony(at + beat if place > 3 else at)
+        bias = torch.tensor([0.0 if p % 12 in tones else -CHART_FORCE for p in range(MAX_PITCH)])
+        pitch_class = lambda pc: PITCHES % 12 == pc % 12
+        if place > 3:
+            bias[pitch_class(root)] = WALK
+            bias[pitch_class(root - 1) | pitch_class(root + 1)] = WALK / 2
+        elif place < 0.25 or self.listener.harmony(at)[:2] != self.listener.harmony(at - beat)[:2]:
+            bias[pitch_class(root)] = WALK
+        else:
+            fifth = next((root + step for step in (7, 6, 8) if (root + step) % 12 in tones), root)
+            for tone in tones - {root % 12, fifth % 12}:
+                bias[pitch_class(tone)] = WALK / 2
+            bias[pitch_class(fifth)] = WALK
+        if line:
+            bias += LINE * torch.tensor(bebop.moves((line[-1][1] - NOTE_OFFSET) % MAX_PITCH)[:MAX_PITCH],
+                                        dtype=torch.float)
+        return bias
+
+    def _tie(self):
+        """Its bass's note just sampled over a bossa held until its next, as a bassist ties them (LEGATO of the
+        time), or half as long: its duration in the context is changed, and fed again."""
+        tick = self.seq[-3] - TIME_OFFSET
+        gap = self._bass_due(tick + 1, tick) - tick
+        length = gap if random.random() < LEGATO else max(gap // 2, 1)
+        self.seq[-2] = DUR_OFFSET + min(length, MAX_DUR - 1)
+        self._crop(len(self.seq) - 2)
+
     def _bossa(self):
         """Whether its bass plays a bossa's figure (BOSSA) over the tune instead of walking."""
         return bool(self.chart) and chart.CHARTS[self.chart - 1].bass == 'bossa'
@@ -762,22 +800,10 @@ class DuoSession:
     def _walk(self, at, line):
         """Logits added to its left hand's pitches over a tune, a walking bass: the root when the bar or the chord
         begins; on the beat before another chord, a semitone from its root; and from one note to the next mostly by
-        step. Over a bossa: the root on 1 and where the chord changes, its fifth on the and of 2 and on 3, and on the
-        and of 4 the next bar's root, ahead of it."""
+        step."""
         bias, beat, low = torch.zeros(MAX_PITCH), 60 / self.pace, PITCHES < BASS_TOP
         here, before, coming = (self.listener.harmony(t)[:2] for t in (at, at - beat, at + beat))
-        place = chart.beats(self, at) % chart.BEATS
-        if self._bossa():
-            if place > 3:   # the next bar's root, outside this chord as it may be
-                bias[(PITCHES % 12 == coming[0]) & low] += CHART_FORCE + WALK
-            elif place < 0.25 or here != before:
-                bias[(PITCHES % 12 == here[0]) & low] += WALK
-            else:
-                tones = self.listener.harmony(at)[2]
-                fifth = next(((here[0] + step) % 12 for step in (7, 6, 8) if (here[0] + step) % 12 in tones), here[0])
-                bias[(PITCHES % 12 == fifth) & low] += WALK
-                bias[(PITCHES % 12 == here[0]) & low] -= ROOT
-        elif here != before or int(chart.beats(self, at) + 0.1) % chart.BEATS == 0:
+        if here != before or int(chart.beats(self, at) + 0.1) % chart.BEATS == 0:
             bias[(PITCHES % 12 == here[0]) & low] += WALK
         else:   # it walks on from the root: the listener's liking for it is taken back
             bias[(PITCHES % 12 == here[0]) & low] -= ROOT

@@ -176,6 +176,28 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual((bass(0.02) % 12, bass(1.5) % 12, bass(2) % 12), (9, 4, 4))   # A, then its fifth E
         self.assertEqual(bass(3.5) % 12, 11)                     # B: the next bar's root, ahead of it
 
+    def test_over_a_bossa_its_bass_is_mostly_legato_and_moves_now_and_then(self):
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('black_orpheus'), playing=1, part=0)
+        session.hear(0.0, 0.3, 60)                               # 120 bpm: a beat is 0.5 s
+        notes = []
+        for _ in range(160):
+            self.clock.t += 0.1
+            while session.ahead() < duo.LOOKAHEAD:
+                notes.append(session.play())
+        bass = [n for n in notes if n and n[3] == 'bass']
+        gaps = [(b[0] - a[0], a[1]) for a, b in zip(bass, bass[1:])]
+        self.assertTrue(all(lasts >= gap / 2 - 0.02 for gap, lasts in gaps), gaps)      # never a fanfare's staccato
+        self.assertGreater(sum(abs(lasts - gap) < 0.02 for gap, lasts in gaps), len(gaps) / 2)   # mostly tied on
+        self.assertLess(sum(abs(lasts - gap) < 0.02 for gap, lasts in gaps), len(gaps))   # but not always
+
+        def second(beat):                                        # the pitch class it likes next best
+            bias = session._partner(session._tick(beat / 2), [], (36, 51), False)[36:52]
+            return [int(p) % 12 for p in bias.argsort(descending=True)[:2] + 36]
+        self.assertEqual(second(1.5)[0], 4)                      # over Am7: its fifth E
+        self.assertIn(second(1.5)[1], (0, 7))                    # or its third C, its seventh G
+        self.assertEqual(second(3.5)[0], 11)                     # ahead of Bm7b5: B
+        self.assertEqual(second(3.5)[1], 0)                      # or C, a semitone over it
+
     def test_over_a_tune_its_right_hand_plays_on_though_the_model_would_rather_walk_its_bass_alone(self):
         class Bassist(UniformModel):
             def __call__(self, inp, past_key_values=None, use_cache=True):
