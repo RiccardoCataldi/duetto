@@ -338,8 +338,8 @@ class DuoSession:
 
     @torch.no_grad()
     def play(self):
-        """Samples the model's next note: (onset, duration, pitch, hand) in session seconds, hand 'left' or 'right';
-        or None when it stays silent."""
+        """Samples the model's next note: (onset, duration, pitch, hand) in session seconds, hand 'left' or 'right',
+        or 'bass' for its walking bass over a tune; or None when it stays silent."""
         self._fit()
         now, last = self.now(), self._last_time()
         you_play = self.heard_at is not None and now - self.heard_at < PLAYING
@@ -543,7 +543,8 @@ class DuoSession:
         self.cursor = max(self.cursor, onset)
         if not self.chart:   # over a tune it does not recall: it plays the changes
             self.mind.own(onset, pitch)
-        return onset, (duration - DUR_OFFSET) / TIME_RESOLUTION, pitch, 'left' if self._instrument(note) == self.left else 'right'
+        hand = 'right' if self._instrument(note) != self.left else 'bass' if self._walks() else 'left'
+        return onset, (duration - DUR_OFFSET) / TIME_RESOLUTION, pitch, hand
 
     def _tick(self, seconds):
         return round(seconds * TIME_RESOLUTION) - self.base

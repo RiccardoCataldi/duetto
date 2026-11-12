@@ -9,8 +9,9 @@ One line per message, times in seconds since the connection opened:
                                                          first key)
     client -> server   "on <onset> <duration> <pitch> <velocity>"   you pressed a key (the duration is a guess)
     client -> server   "off <onset> <pitch> <duration>"  the key you pressed at <onset> stopped sounding (pedal and all)
-    server -> client   "note <onset> <duration> <pitch> <hand>"   the model's next note, of its left or right hand;
-                                                      how hard is left to the client
+    server -> client   "note <onset> <duration> <pitch> <hand>"   the model's next note, of its left or right hand,
+                                                      or of its walking bass over a tune (bass: one note at a time,
+                                                      as long as written); how hard is left to the client
     server -> client   "cut <onset>"                     forget the model's notes from <onset> on: they are resampled
     server -> client   "tempo <bpm> <metronome> <bar>"   the tempo it keeps to (0: yours), a bar's first beat at <bar>
                                                          and a beat every 60 / bpm from it, and whether to click

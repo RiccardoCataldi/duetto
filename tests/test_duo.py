@@ -59,6 +59,16 @@ class DuoTest(unittest.TestCase):
         self.duo.tick(102.0 + 0.5 + main.RING_S)
         self.assertIn(([0x80, 67, 0], True), self.out.messages)
 
+    def test_its_walking_bass_plays_one_note_at_a_time_and_does_not_ring(self):
+        self.duo.receive("note 2.000 0.900 41 bass\n")
+        self.duo.receive("note 2.500 0.400 43 bass\n")
+        self.duo.tick(102.0)
+        self.duo.tick(102.5)   # the next note stops the one before, as on a double bass
+        played = [(m[0] & 0xF0, m[1]) for m, generated in self.out.messages if generated]
+        self.assertEqual(played, [(0x90, 41), (0x80, 41), (0x90, 43)])
+        self.duo.tick(102.5 + 0.4)   # as long as it was written: no pedal
+        self.assertIn(([0x80, 43, 0], True), self.out.messages)
+
     def test_a_cut_drops_the_notes_that_have_not_sounded(self):
         for line in ("note 2.000 0.200 60\n", "note 2.500 0.200 62\n", "note 3.000 0.200 64\n"):
             self.duo.receive(line)

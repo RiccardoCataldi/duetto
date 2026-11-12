@@ -149,10 +149,10 @@ class DuoSessionTest(unittest.TestCase):
             self.clock.t += 0.1
             while session.ahead() < duo.LOOKAHEAD:
                 notes.append(session.play())
-        bass = sorted({round(n[0] * 2) for n in notes if n[3] == 'left'})
+        bass = sorted({round(n[0] * 2) for n in notes if n[3] == 'bass'})
         self.assertEqual(bass, list(range(bass[0], bass[-1] + 1)))   # no beat without its bass note
         self.assertGreater(len(bass), 12)
-        self.assertTrue(all(abs(n[0] * 2 - round(n[0] * 2)) < 0.07 for n in notes if n[3] == 'left'))
+        self.assertTrue(all(abs(n[0] * 2 - round(n[0] * 2)) < 0.07 for n in notes if n[3] == 'bass'))
         self.assertGreater(sum(n[3] == 'right' for n in notes), 5)
 
     def test_over_a_tune_its_right_hand_plays_on_though_the_model_would_rather_walk_its_bass_alone(self):
@@ -179,7 +179,7 @@ class DuoSessionTest(unittest.TestCase):
             self.assertGreater(len(right), 8, part)
             self.assertLess(max(b - a for a, b in zip(right, right[1:])), 3.5, part)   # a second, a breath, a bar: it
                                                                                       # takes the last moment it may
-            self.assertGreater(sum(bool(n) and n[3] == 'left' for n in notes), 30, part)   # and its bass walks on
+            self.assertGreater(sum(bool(n) and n[3] == 'bass' for n in notes), 30, part)   # and its bass walks on
             self.clock.t = start
 
     def test_soloing_over_its_walking_bass_it_comps_a_chord_now_and_then_under_its_line(self):
@@ -215,7 +215,7 @@ class DuoSessionTest(unittest.TestCase):
                 self.assertGreaterEqual(sum(n[1] <= 1.5 * beat + 0.01 for n in under if n[0] == onset), 3)
             line = [n for n in notes if n[3] == 'right' and n not in under]
             self.assertGreater(len(line), 2 * len(chords))   # its line goes on over them, and its bass under
-            self.assertGreater(sum(n[3] == 'left' for n in notes), 0.8 * 4 * bars)
+            self.assertGreater(sum(n[3] == 'bass' for n in notes), 0.8 * 4 * bars)
 
     def test_over_a_tune_its_part_says_what_its_hands_do_whatever_the_other_knobs(self):
         self.session.turn(chart=self.tune('blues_in_f'), playing=1, part=0)
@@ -242,10 +242,10 @@ class DuoSessionTest(unittest.TestCase):
             self.clock.t += 0.1
             while session.ahead() < duo.LOOKAHEAD:
                 notes.append(session.play())
-        bass = sorted({round(n[0] * 2) for n in notes if n and n[3] == 'left'})
+        bass = sorted({round(n[0] * 2) for n in notes if n and n[3] == 'bass'})
         self.assertEqual(bass, list(range(bass[0], bass[-1] + 1)))   # no beat without its bass note
         self.assertGreater(len(bass), 12)
-        self.assertTrue(all(n[2] < 52 for n in notes if n and n[3] == 'left'))
+        self.assertTrue(all(n[2] < 52 for n in notes if n and n[3] == 'bass'))
         self.assertTrue(all(n[2] >= 72 for n in notes if n and n[3] == 'right'))
 
     def test_over_a_tune_it_comps_more_than_four_chords_before_a_breath(self):

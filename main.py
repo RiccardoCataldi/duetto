@@ -48,11 +48,11 @@ def dynamics(pitch, hand, together, line, level, accompanying, rng=random):
     """The velocity of one of the model's notes. `together`: the pitches its right hand starts with it,
     `line`: its right hand's last pitches, `level`: how loud you play, `accompanying`: whether you are playing."""
     velocity = max(level, QUIETEST) * SOFTER * (ACCOMPANY if accompanying else 1)
-    if hand == 'left':
+    if hand in ('left', 'bass'):
         velocity *= LEFT_HAND
     elif len(together) > 1:
         velocity *= TOP if pitch == max(together) else INNER
-    if hand != 'left' and len(line) >= 4 and max(line) > min(line):
+    if hand == 'right' and len(line) >= 4 and max(line) > min(line):
         height = min(max((pitch - min(line)) / (max(line) - min(line)), 0), 1)
         velocity *= 1 + CONTOUR * (height - 0.5)
     velocity += rng.uniform(-HUMAN, HUMAN)
@@ -83,6 +83,7 @@ class Duo:
         self.played_at = None          # when you last pressed a key
         self.pending = []              # the model's notes not started yet: (onset, duration, pitch, hand)
         self.sounding = {}             # pitch -> (onset, offset, velocity) of the model's notes
+        self.bass = None               # the pitch its walking bass sounds: one at a time
         self.line = deque(maxlen=CONTOUR_NOTES)   # its right hand's last pitches
         self.late = 0                  # the model's notes that came later than LATE_S, skipped
         self.bpm, self.metronome = 0, False   # the tempo the model keeps to (0: yours) and whether we click it
@@ -159,10 +160,15 @@ class Duo:
                     self._release(pitch, now)
                 together = [n[2] for n in due if n[0] == onset and n[3] == hand]
                 velocity = dynamics(pitch, hand, together, self.line, self.level, accompanying, self.rng)
-                if hand != 'left':
+                if hand == 'right':
                     self.line.append(pitch)
+                ring = max(duration * RING, duration + RING_S)
+                if hand == 'bass':   # a double bass: each note stops the one before, and no pedal
+                    if self.bass in self.sounding:
+                        self._release(self.bass, now)
+                    self.bass, ring = pitch, duration
                 self.midi_rec.play_midi_message([0x90, pitch, velocity], is_generated=True)
-                self.sounding[pitch] = (now, now + max(duration * RING, duration + RING_S), velocity)
+                self.sounding[pitch] = (now, now + ring, velocity)
 
     def _click(self, now):
         """Clicks the beat that is due: the model's beats fall on k * 60 / bpm seconds after the connection opened."""
