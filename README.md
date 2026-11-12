@@ -68,23 +68,9 @@ Eighths are swung unless the chart says `feel: straight`.
 
 ## How it works
 
-```mermaid
-flowchart LR
-    subgraph LAPTOP["Laptop"]
-        KEYS["keyboard"] --> MAIN["main.py<br/>timing, dynamics,<br/>metronome, recording"]
-        MAIN --> SYNTH["FluidSynth"]
-        ROLL["pianoroll.py + knobs.py<br/>piano roll and panel"]
-    end
-    subgraph GPU["PC with a GPU"]
-        SERVER["server.py"] --> SESSION["duo.py<br/>masks and biases on<br/>each sampled note"]
-        SESSION --> MODEL["AMT"]
-        LISTEN["listener.py, memory.py,<br/>chart.py, licks.py"] --> SESSION
-    end
-    MAIN -- "your notes" --> SERVER
-    SERVER -- "its notes" --> MAIN
-    ROLL -- "knobs" --> SERVER
-    SERVER -- "what it hears and does" --> ROLL
-```
+![How duetto works, in five levels: overview, where it runs, inside the GPU host, who decides each note, the Memory](docs/diagrams/duetto.svg)
+
+The diagram's source is [docs/diagrams/duetto.excalidraw](docs/diagrams/duetto.excalidraw): open it in [Excalidraw](https://excalidraw.com) or VS Code's Excalidraw extension.
 
 Your notes and the model's are one sequence AMT continues, a note at a time (when, how long, which). Before each sample `duo.py` masks what may not be (a hand that must wait, a pitch out of register) and biases what should be (the chord's tones, the next note of a phrase it quotes). The server keeps a second of music sampled ahead and resamples it when you play. On a 3080 Ti a note takes ~12 ms (medium) or ~18 ms (large).
 
