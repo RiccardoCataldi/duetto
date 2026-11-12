@@ -1,7 +1,7 @@
 """
 A chart, as in a Real Book: the chords of a tune bar by bar, in 4/4, for the duo to play over with a metronome.
 A file in charts/ is a few `name: value` lines (title, key as "G minor", bpm, feel: straight for even eighths
-instead of swung ones) and then the bars, between `|`: one or
+instead of swung ones, bass: bossa for a bossa's bass instead of a walking one) and then the bars, between `|`: one or
 more chords each, sharing the bar equally; `%` is the bar before again. Chords are spelt as in a Real Book or
 iReal Pro (Cm7, C-7, F7b9, C7#5, Bbmaj7, B^7, Am7b5, Aø, Gm6, C7/E...) and heard as the nearest of listener.CHORDS.
 """
@@ -44,12 +44,15 @@ class Chart:
         self.name = os.path.splitext(os.path.basename(path))[0]
         self.title, self.bpm, self.key, self.bars = self.name.replace('_', ' '), 120, None, []
         self.swing = True   # its eighths are swung: the second of each beat on its last third
+        self.bass = 'walk'  # its bass: a note a beat, or 'bossa': root and fifth on 1, the and of 2, 3, the and of 4
         with open(path) as f:
             for line in f:
                 head, _, value = line.partition(':')
-                if value and head.strip() in ('title', 'key', 'bpm', 'feel'):
+                if value and head.strip() in ('title', 'key', 'bpm', 'feel', 'bass'):
                     if head.strip() == 'feel':
                         self.swing = value.strip() != 'straight'
+                    elif head.strip() == 'bass':
+                        self.bass = value.strip()
                     elif head.strip() == 'title':
                         self.title = value.strip()
                     elif head.strip() == 'bpm':

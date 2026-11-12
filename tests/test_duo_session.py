@@ -155,6 +155,27 @@ class DuoSessionTest(unittest.TestCase):
         self.assertTrue(all(abs(n[0] * 2 - round(n[0] * 2)) < 0.07 for n in notes if n[3] == 'bass'))
         self.assertGreater(sum(n[3] == 'right' for n in notes), 5)
 
+    def test_over_a_bossa_its_bass_plays_root_and_fifth_on_one_the_and_of_two_three_and_the_and_of_four(self):
+        from music_transformer.chart import CHARTS
+        self.assertEqual(CHARTS[self.tune('black_orpheus') - 1].bass, 'bossa')
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('black_orpheus'), playing=1, part=0)
+        session.hear(0.0, 0.3, 60)                               # 120 bpm: a beat is 0.5 s
+        notes = []
+        for _ in range(80):
+            self.clock.t += 0.1
+            while session.ahead() < duo.LOOKAHEAD:
+                notes.append(session.play())
+        at = [n[0] * 2 % 4 for n in notes if n and n[3] == 'bass']   # in beats, in the bar
+        self.assertGreater(len(at), 12)                         # 4 bars: 16 notes
+        self.assertTrue(all(min(abs(a - p) for p in (0, 1.5, 2, 3.5, 4)) < 0.15 for a in at), at)
+        for p in (0, 1.5, 2, 3.5):                               # the whole figure, not only its downbeats
+            self.assertGreater(sum(abs(a - p) < 0.15 for a in at), 3, p)
+
+        def bass(beat):                                          # Am7 | Bm7b5 E7b9 | ...
+            return int(session._partner(session._tick(beat / 2), [], (36, 51), False)[36:52].argmax()) + 36
+        self.assertEqual((bass(0.02) % 12, bass(1.5) % 12, bass(2) % 12), (9, 4, 4))   # A, then its fifth E
+        self.assertEqual(bass(3.5) % 12, 11)                     # B: the next bar's root, ahead of it
+
     def test_over_a_tune_its_right_hand_plays_on_though_the_model_would_rather_walk_its_bass_alone(self):
         class Bassist(UniformModel):
             def __call__(self, inp, past_key_values=None, use_cache=True):

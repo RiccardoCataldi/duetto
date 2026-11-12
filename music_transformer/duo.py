@@ -88,6 +88,7 @@ UNDER = (52, 69)  # the chords it comps under its own solo: from E3 to A4, as a 
 STAB = 3          # their notes
 LATE = 6          # ticks: a note of a phrase it quotes may be this late and still be played
 WALK = 4.0        # logit added to the root where its walking bass begins a bar or a chord
+BOSSA = (0, 1.5, 2, 3.5)   # beats of the bar its bass plays on over a bossa: 1, the and of 2, 3, the and of 4
 EARLY = 0.15      # beats before a bar line your phrase may begin and still begin at it: you rushed, it is no upbeat
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does
@@ -387,14 +388,11 @@ class DuoSession:
             if line:
                 window[mine + 1:mine + step] = -float('inf')
             hands.append((instrument, line, register, window))
-        # its bass walks: a note on every beat. Nothing is played past the next beat its left hand owes
+        # its bass walks: a note on every beat, or on the bossa's figure. Nothing is played past the next note its
+        # left hand owes
         due, left = None, next((hand for hand in hands if hand[0] == self.left), None)
         if walks and left and len(hands) == 2:
-            beat, origin = 60 / self.pace * TIME_RESOLUTION, self.began * TIME_RESOLUTION - self.base
-            k = math.ceil((earliest - origin - self.grid) / beat)
-            if left[1] and left[1][-1][0] >= round(origin + k * beat) - self.grid:
-                k += 1   # this beat has its note: the next one
-            due = round(origin + k * beat)
+            due = self._bass_due(earliest, left[1][-1][0] if left[1] else -MAX_TIME)
             if due + self.grid + 1 < MAX_TIME:
                 left[3][:] = -float('inf')   # on the beat, and only there
                 if not quote or quote[0] >= due:   # a note it quotes before the beat comes first
@@ -430,6 +428,8 @@ class DuoSession:
                                            0 if quote else feel)
                 if comp and not late:   # its chord has its own place in the bar, whatever the line's rhythm
                     mask[TIME_OFFSET + stab[0]:TIME_OFFSET + stab[1] + 1] = 0
+                if due is not None and not late and torch.isfinite(left[3][due + self.grid]):   # so has its bass,
+                    mask[TIME_OFFSET + max(due, earliest):TIME_OFFSET + due + self.grid + 1] = 0   # off the beat too
             elif slot == 1 and comp and bool(torch.isfinite(comp[3][self.seq[-1] - TIME_OFFSET])):   # a short chord
                 beat = round(60 / self.pace * TIME_RESOLUTION)
                 mask[DUR_OFFSET + min(10, beat // 2):DUR_OFFSET + min(beat + beat // 2, MAX_DUR - 1) + 1] = 0
@@ -596,7 +596,8 @@ class DuoSession:
                 if max(low, lowest) <= min(high, highest) else (low, high)
             right = (self.me, self.min_step, 1, within(SOLO[0], SOLO[1])) if solos else \
                 (self.me, self.min_step, max(self.chord, 3), within(COMP[0], COMP[1]))
-            beat = max(round(60 / self.pace * TIME_RESOLUTION) - self.grid - 1, 5)
+            beat = 60 / self.pace * TIME_RESOLUTION * (0.5 if self._bossa() else 1)   # the least between its notes
+            beat = max(round(beat) - self.grid - 1, 5)
             return [right] + ([(self.left, beat, 1, BASS)] if self._walks() else [])   # its octaves bound its right hand only
         right = (self.me, self.space if you_play else self.min_step, self.chord if you_play else self.solo_chord)
         if self.hands == 1:
@@ -743,13 +744,40 @@ class DuoSession:
                     for at_, (_, lasts, pitch) in zip(at, phrase)]])
             self.learned, phrase = note[0], []
 
+    def _bossa(self):
+        """Whether its bass plays a bossa's figure (BOSSA) over the tune instead of walking."""
+        return bool(self.chart) and chart.CHARTS[self.chart - 1].bass == 'bossa'
+
+    def _bass_due(self, earliest, played):
+        """The tick of the next note its bass owes from `earliest`, its last having been at `played`: on every beat,
+        or over a bossa on its figure."""
+        beat, origin = 60 / self.pace * TIME_RESOLUTION, self.began * TIME_RESOLUTION - self.base
+        figure = BOSSA if self._bossa() else range(chart.BEATS)
+        bar = math.floor((earliest - origin - self.grid) / beat / chart.BEATS)
+        for at in (k * chart.BEATS + step for k in (bar, bar + 1, bar + 2) for step in figure):
+            tick = round(origin + at * beat)
+            if tick >= earliest - self.grid and played < tick - self.grid:   # a place that has no note yet
+                return tick
+
     def _walk(self, at, line):
         """Logits added to its left hand's pitches over a tune, a walking bass: the root when the bar or the chord
         begins; on the beat before another chord, a semitone from its root; and from one note to the next mostly by
-        step."""
+        step. Over a bossa: the root on 1 and where the chord changes, its fifth on the and of 2 and on 3, and on the
+        and of 4 the next bar's root, ahead of it."""
         bias, beat, low = torch.zeros(MAX_PITCH), 60 / self.pace, PITCHES < BASS_TOP
         here, before, coming = (self.listener.harmony(t)[:2] for t in (at, at - beat, at + beat))
-        if here != before or int(chart.beats(self, at) + 0.1) % chart.BEATS == 0:
+        place = chart.beats(self, at) % chart.BEATS
+        if self._bossa():
+            if place > 3:   # the next bar's root, outside this chord as it may be
+                bias[(PITCHES % 12 == coming[0]) & low] += CHART_FORCE + WALK
+            elif place < 0.25 or here != before:
+                bias[(PITCHES % 12 == here[0]) & low] += WALK
+            else:
+                tones = self.listener.harmony(at)[2]
+                fifth = next(((here[0] + step) % 12 for step in (7, 6, 8) if (here[0] + step) % 12 in tones), here[0])
+                bias[(PITCHES % 12 == fifth) & low] += WALK
+                bias[(PITCHES % 12 == here[0]) & low] -= ROOT
+        elif here != before or int(chart.beats(self, at) + 0.1) % chart.BEATS == 0:
             bias[(PITCHES % 12 == here[0]) & low] += WALK
         else:   # it walks on from the root: the listener's liking for it is taken back
             bias[(PITCHES % 12 == here[0]) & low] -= ROOT
