@@ -5,7 +5,7 @@ A piano roll of the duo: your notes and the model's rise from the keyboard as yo
     python pianoroll.py video duo.mid --audio duo.ogg -o duo.mp4
 
 Live, it listens to what main.py sends to FluidSynth on Midi Through: channel 0 is you, channel 1 the model;
-the knobs beside it (knobs.py) turn the model's on the Jetson while you play.
+the knobs beside it (knobs.py) turn the model's on its server while you play.
 """
 import argparse
 import math
@@ -23,12 +23,12 @@ from theme import AI, FAINT, MUTED, TEXT, YOU, mix
 SIZE = (1280, 720)
 FPS = 60                  # live
 VIDEO_FPS = 30
-RANGE = (36, 96)          # live: C2 to C7; a video fits the octaves its notes use
+RANGE = (21, 108)         # live: the 88 keys of a piano, A0 to C8 (its bass walks from E1); a video fits the octaves its notes use
 KEYBOARD_H = 120
 SPEED = 140               # pixels a second the notes rise
 TAIL_S = 5                # seconds the video goes on after the last note, while the reverb dies away
 
-HEADER_H = 96            # the players, what the model hears and does, and the time, over the notes' fade
+HEADER_H = 96            # the players, what the model hears, and the time, over the notes' fade
 
 BACKGROUND = theme.BACKGROUND
 WHITE_KEY = (232, 234, 240)
@@ -37,6 +37,9 @@ FELT = (112, 30, 44)      # the strip of red felt over the keys
 GRID = (255, 255, 255, 12)
 
 PLAYERS = {0: ('You', 'piano', YOU), 1: ('AI', 'piano', AI)}
+KEYS = 'duetto keys'      # main.py's MIDI port for the laptop's keyboard
+# the laptop's keyboard as a piano, as in Ableton Live: a row of white keys with the black ones above it, from C
+NOTE_KEYS = {key: step for step, key in enumerate('awsedftgyhujkolp')}
 
 
 def is_black(pitch):
@@ -115,8 +118,8 @@ class Roll:
             self.fade.fill((*BACKGROUND[0], alpha), pygame.Rect(0, y, width, 1))
         self.glow = {c: glow_sprite(colour) for c, (_, _, colour) in PLAYERS.items()}
         self.instruments = {}     # channel -> the instrument it plays, if not PLAYERS'
-        self.ai_range = None      # (lowest, highest) pitch the model may play, shown above the keyboard
-        self.readout = None       # what the model hears and does, shown at the top: (what, as it stands)
+        self.readout = None       # where the tune is, shown at the top: (what, as it stands)
+        self.chart = None         # the tune it plays over: {'title', 'bars': [[chord, ...], ...], 'bar', 'beat'}
         self.offline = None       # or why it cannot say
         self.hint = None          # a key to press, in the corner
         self.header = pygame.Surface((width, HEADER_H), pygame.SRCALPHA)
@@ -152,23 +155,11 @@ class Roll:
                 screen.blit(sprite, (round(x + w / 2 - sprite.get_width() / 2), top - sprite.get_height() // 2),
                             special_flags=pygame.BLEND_ADD)
         screen.blit(self.fade, (0, 0))
-        self._range(screen, top)
         self.keyboard.draw(screen, lit)
         self.keyboard.finish(screen)
         self._header(screen, clock)
-
-    def _range(self, screen, top):
-        """A line in the model's colour over the keys it may play, when it may not play them all."""
-        if self.ai_range is None:
-            return
-        keys = self.keyboard.x
-        low, high = max(self.ai_range[0], min(keys)), min(self.ai_range[1], max(keys))
-        if low > high or (low == min(keys) and high == max(keys)):
-            return
-        left = keys[low][0]
-        right = keys[high][0] + keys[high][1]
-        pygame.draw.line(screen, AI, (round(left) + 2, top - 6), (round(right) - 2, top - 6), 3)
-        theme.text(screen, 'AI range', 11, AI, (round(left) + 4, top - 10), anchor='bottomleft')
+        if self.chart:
+            self._chart(screen)
 
     def _header(self, screen, clock):
         screen.blit(self.header, (0, 0))
@@ -184,7 +175,8 @@ class Roll:
         if clock is not None:
             stamp = theme.text(screen, f"{int(clock) // 60}:{int(clock) % 60:02d}", 15, TEXT, (right, 21), bold=True,
                                anchor='topright')
-            theme.text(screen, self.hint or 'duetto', 12, MUTED, (right, stamp.bottom + 1), anchor='topright')
+            hint = theme.text(screen, self.hint or 'duetto', 12, MUTED, (right, stamp.bottom + 1), anchor='topright')
+            right = min(right, hint.left + 74)   # a long hint takes room from the readout
         if self.readout:
             self._readout(screen, x, right - 90)
         elif self.offline:
@@ -196,12 +188,50 @@ class Roll:
             pygame.draw.circle(screen, mix(theme.FAINT, AI, pulse), (pill.x + 16, pill.centery), 4)
             screen.blit(words, words.get_rect(midleft=(pill.x + 28, pill.centery)))
 
+    def _chart(self, screen):
+        """The tune as a page of a Real Book: its bars in rows of eight (four in a narrow window), the chords in
+        each, the bar being played lit with its beats under it, and a double line where the tune ends."""
+        bars, now = self.chart['bars'], self.chart['bar']
+        if self.chart.get('count'):   # the count-in: the beats to go, large
+            theme.text(screen, str(self.chart['count']), 64, AI, (self.size[0] // 2, self.keyboard.top - 120),
+                       bold=True, anchor='center')
+        width = self.size[0]
+        across = 8 if width >= 900 else 4
+        cell_w, cell_h = min((width - 56) // across, 150), 44
+        rows = -(-len(bars) // across)
+        left, top = (width - cell_w * across) // 2, HEADER_H - 14
+        page = pygame.Surface((cell_w * across + 24, rows * cell_h + 20), pygame.SRCALPHA)
+        pygame.draw.rect(page, (*theme.SURFACE, 225), page.get_rect(), border_radius=12)
+        screen.blit(page, (left - 12, top - 10))
+        for i, chords in enumerate(bars):
+            cell = pygame.Rect(left + i % across * cell_w, top + i // across * cell_h, cell_w, cell_h)
+            if i == now:
+                pygame.draw.rect(screen, mix(AI, theme.SURFACE, 0.72), cell.inflate(-4, -4), border_radius=7)
+                for beat in range(4):
+                    dot = (cell.centerx - 15 + 10 * beat, cell.bottom - 8)
+                    pygame.draw.circle(screen, AI if beat <= self.chart['beat'] else FAINT, dot, 2)
+            pygame.draw.line(screen, theme.LINE, cell.topleft, (cell.x, cell.bottom - 1), 1)
+            same = i % across and chords == bars[i - 1]   # the bar before again: a Real Book's repeat sign
+            names = ['%'] if same and i != now else chords
+            for k, name in enumerate(names):
+                colour = TEXT if i == now else FAINT if same else MUTED
+                room = cell_w / len(names)
+                theme.text(screen, theme.fit(name, 15, room - 8, i == now), 15, colour,
+                           (round(cell.x + room * (k + 0.5)), cell.centery - 3), bold=i == now, anchor='center')
+        if self.chart.get('quote'):   # whose phrase it is playing
+            theme.text(screen, theme.fit(f"quoting {self.chart['quote']}", 13, cell_w * across), 13, AI,
+                       (self.size[0] // 2, top + rows * cell_h + 22), anchor='center')
+        end = left + (len(bars) - 1) % across * cell_w + cell_w
+        y = top + (rows - 1) * cell_h
+        for x in (end - 4, end - 1):
+            pygame.draw.line(screen, MUTED, (x, y + 4), (x, y + cell_h - 5), 1 if x < end - 1 else 2)
+
     def _readout(self, screen, left, right):
-        """Your key, chord and tempo, and what the model is doing, as cells across the middle, as many as fit."""
+        """Your key, chord and tempo, or the Tune and its bar, as cells across the middle, as many as fit."""
         cells = []
         for caption, value in self.readout:
             value = theme.capital(value)
-            cells.append((caption.upper(), value, max(theme.width(value, 17, True), 64) + (16 if caption == 'AI' else 0)))
+            cells.append((caption.upper(), value, max(theme.width(value, 17, True), 64)))
         gap = 36
         while cells and sum(w for *_, w in cells) + gap * (len(cells) - 1) > right - left:
             cells.pop(0)
@@ -211,14 +241,7 @@ class Roll:
             if i:
                 pygame.draw.line(screen, theme.LINE, (x - gap // 2, 22), (x - gap // 2, 52))
             theme.text(screen, caption, 10, MUTED, (x, 19), bold=True)
-            at = x
-            if caption == 'AI':
-                waiting = value.startswith('Waiting')
-                pulse = 0.5 + 0.5 * math.sin(time.monotonic() * 5)
-                pygame.draw.circle(screen, FAINT if waiting else mix(AI, (255, 255, 255), 0.3 * pulse), (x + 4, 44),
-                                   4)
-                at += 16
-            theme.text(screen, value, 17, AI if caption == 'AI' else TEXT, (at, 33), bold=True)
+            theme.text(screen, value, 17, TEXT, (x, 33), bold=True)
             x += w + gap
 
 
@@ -255,6 +278,37 @@ def notes_from_midi(path):
             if start is not None:
                 notes.append((start, now, message.note, message.channel))
     return notes
+
+
+class Typing:
+    """The laptop's keyboard as a piano, as in Ableton Live: A W S E D F T G Y H U J K O L P are the keys from C,
+    Z and X go an octave down and up, C and V play softer and louder. `send` takes a MIDI message."""
+
+    def __init__(self, send):
+        self.send = send
+        self.octave, self.velocity = 5, 100   # A is middle C
+        self.down = {}                         # key -> the pitch it plays, while it is held
+
+    def handles(self, key):
+        return key in NOTE_KEYS or key in ('z', 'x', 'c', 'v')
+
+    def key(self, key, pressed):
+        if pressed and key in NOTE_KEYS and key not in self.down:
+            self.down[key] = 12 * self.octave + NOTE_KEYS[key]
+            self.send([0x90, self.down[key], self.velocity])
+        elif not pressed and key in self.down:
+            self.send([0x80, self.down.pop(key), 0])
+        elif pressed and key in ('z', 'x'):
+            self.octave = min(max(self.octave + (1 if key == 'x' else -1), 0), 9)
+        elif pressed and key in ('c', 'v'):
+            self.velocity = min(max(self.velocity + (20 if key == 'v' else -20), 20), 120)
+
+    def release(self):
+        for key in list(self.down):
+            self.key(key, False)
+
+    def says(self):
+        return f"A W S E D…: piano · Z X: C{self.octave - 1} · C V: velocity {self.velocity}"
 
 
 class Live:
@@ -311,6 +365,16 @@ def live(port_name, server):
 
     midi.set_callback(hear)
     panel, shown = Panel(server, engine), True
+    keys = rtmidi.MidiOut()   # the laptop's keyboard plays into main.py, as a MIDI keyboard would
+    typing = Typing(keys.send_message)
+
+    def plug():
+        port = next((i for i, p in enumerate(keys.get_ports()) if KEYS in p), None)
+        if not keys.is_port_open() and port is not None:   # main.py is playing
+            keys.open_port(port)
+        return keys.is_port_open()
+
+    typed = plug()   # on whenever main.py plays: F and K are keys of the piano then, F11 and Tab stand in for them
 
     def layout():
         width, height = screen.get_size()
@@ -323,8 +387,16 @@ def live(port_name, server):
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 return
-            if event.type == pygame.KEYDOWN and event.key in (pygame.K_f, pygame.K_k):
-                if event.key == pygame.K_f:
+            if not typed and event.type == pygame.KEYDOWN:
+                typed = plug()   # main.py started after us
+            if typed and event.type in (pygame.KEYDOWN, pygame.KEYUP) and typing.handles(pygame.key.name(event.key)):
+                typing.key(pygame.key.name(event.key), event.type == pygame.KEYDOWN)
+                continue   # F and K are keys of the piano now
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:   # no key of the laptop's piano
+                panel.mind.transport()
+                continue
+            if event.type == pygame.KEYDOWN and event.key in (pygame.K_f, pygame.K_k, pygame.K_F11, pygame.K_TAB):
+                if event.key in (pygame.K_f, pygame.K_F11):
                     pygame.display.toggle_fullscreen()
                 else:
                     shown = not shown
@@ -336,12 +408,9 @@ def live(port_name, server):
         now = time.monotonic()
         roll.instruments = {player: sound.GM[engine.sound[player]['instrument']] for player in PLAYERS}
         roll.readout = panel.mind.readout()
+        roll.chart = (panel.mind.state or {}).get('chart')
         roll.offline = None if panel.mind.knobs else 'Connecting to the model…'
-        roll.hint = None if shown else 'K: show the controls'
-        mind = {name: round(knob.value) for name, knob in panel.mind.knobs.items() if name in ('lowest', 'highest')}
-        if len(mind) == 2:
-            low, high = sorted(mind.values())
-            roll.ai_range = (12 * (low + 1), 12 * (high + 1) + 11)
+        roll.hint = typing.says() if typed else None if shown else 'K: show the controls'
         roll.draw(view, [tuple(n) for n in heard.visible(now, view.get_height())], now, now - started)
         if side.width:
             panel.draw(screen.subsurface(side))

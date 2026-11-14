@@ -10,6 +10,7 @@ import time
 from collections import deque
 
 import mido
+import rtmidi
 
 import sound
 from CK_rec.setup import Setup
@@ -22,11 +23,13 @@ GENERATED_PROGRAM = 0    # Acoustic Grand Piano too: a duo of two pianos, you on
 INPUT_CONTROLS = ((10, 40),)                                  # pan
 GENERATED_CONTROLS = ((7, 100), (10, 88), (91, 70), (93, 0))  # volume, pan, reverb send, chorus send
 PEDAL = 64               # the sustain pedal's control
+KEYS = 'duetto keys'     # our MIDI port for the laptop's keyboard (pianoroll.py plays into it)
 PLUG_S = 1.0             # how often we look whether your keyboard was unplugged or plugged back in
 RING = 1.6               # its notes ring this much longer than the model wrote them, as if with a light pedal
 RING_S = 0.4             # and at least this many seconds more
 # its dynamics, shaped as a pianist shapes them; it follows how loud you play (LEVEL: how much your last note counts)
 LEVEL = 0.3
+QUIETEST = 80            # the softest it follows you down to: some keyboards never send more than 70
 SOFTER = 0.8             # it plays a little softer than you
 ACCOMPANY = 0.85         # and softer still while you play
 LEFT_HAND = 0.85         # its left hand under its right
@@ -34,7 +37,7 @@ TOP, INNER = 1.08, 0.82  # in a chord the top voice sings and the inner voices f
 CONTOUR = 0.2            # its line swells as it rises and falls back as it descends: this much from lowest to highest
 CONTOUR_NOTES = 16       # its last notes the contour is measured against
 HUMAN = 4                # velocity a little different every time, as a hand never strikes twice the same
-# the metronome of a tempo you fix (the bpm and metronome knobs): General MIDI percussion, a bar of BAR beats
+# the metronome of the tune (the bpm and metronome knobs): General MIDI percussion, a bar of BAR beats
 DRUMS = 9
 CLICK = (76, 77)         # hi wood block on the first beat of a bar, low wood block on the others
 CLICK_VELOCITY = 70
@@ -44,12 +47,12 @@ BAR = 4
 def dynamics(pitch, hand, together, line, level, accompanying, rng=random):
     """The velocity of one of the model's notes. `together`: the pitches its right hand starts with it,
     `line`: its right hand's last pitches, `level`: how loud you play, `accompanying`: whether you are playing."""
-    velocity = level * SOFTER * (ACCOMPANY if accompanying else 1)
-    if hand == 'left':
+    velocity = max(level, QUIETEST) * SOFTER * (ACCOMPANY if accompanying else 1)
+    if hand in ('left', 'bass'):
         velocity *= LEFT_HAND
     elif len(together) > 1:
         velocity *= TOP if pitch == max(together) else INNER
-    if hand != 'left' and len(line) >= 4 and max(line) > min(line):
+    if hand == 'right' and len(line) >= 4 and max(line) > min(line):
         height = min(max((pitch - min(line)) / (max(line) - min(line)), 0), 1)
         velocity *= 1 + CONTOUR * (height - 0.5)
     velocity += rng.uniform(-HUMAN, HUMAN)
@@ -78,12 +81,14 @@ class Duo:
         self.durations = deque(maxlen=16)
         self.level = 80                # how loud you play
         self.played_at = None          # when you last pressed a key
-        self.pending = []              # the model's notes not started yet: (onset, duration, pitch, hand, velocity)
+        self.pending = []              # the model's notes not started yet: (onset, duration, pitch, hand)
         self.sounding = {}             # pitch -> (onset, offset, velocity) of the model's notes
+        self.bass = None               # the pitch its walking bass sounds: one at a time
         self.line = deque(maxlen=CONTOUR_NOTES)   # its right hand's last pitches
         self.late = 0                  # the model's notes that came later than LATE_S, skipped
-        self.bpm, self.metronome = 0, False   # the tempo the model keeps to (0: yours) and whether we click it
+        self.bpm, self.metronome = 0, False   # the tempo the model keeps to and whether we click it
         self.click_at = None           # when the metronome's next beat falls
+        self.bar_at = started          # when a bar of the metronome begins: its beats are counted from there
 
     def note_on(self, pitch, velocity, now):
         with self.lock:
@@ -127,14 +132,14 @@ class Duo:
         kind, *values = line.split()
         with self.lock:
             if kind == 'note':
-                onset, duration, pitch, *how = values   # its hand, and how hard if the model says (Aria does)
-                hand, velocity = (how + ['right'])[0], int(how[1]) if len(how) > 1 else None
-                self.pending.append((self.started + float(onset), float(duration), int(pitch), hand, velocity))
+                onset, duration, pitch, *how = values   # its hand, if the model says
+                self.pending.append((self.started + float(onset), float(duration), int(pitch), (how + ['right'])[0]))
             elif kind == 'cut':
                 cut = self.started + float(values[0])
                 self.pending = [n for n in self.pending if n[0] < cut]
             elif kind == 'tempo':
                 self.bpm, self.metronome, self.click_at = float(values[0]), values[1] == '1', None
+                self.bar_at = self.started + (float(values[2]) if len(values) > 2 else 0)
 
     def tick(self, now):
         """Starts and stops the model's notes that are due, and clicks the metronome."""
@@ -147,30 +152,35 @@ class Duo:
             due = [n for n in self.pending if n[0] <= now]
             self.pending = [n for n in self.pending if n[0] > now]
             accompanying = self.played_at is not None and now - self.played_at < 1.0
-            for onset, duration, pitch, hand, given in sorted(due, key=lambda n: n[:3]):
+            for onset, duration, pitch, hand in sorted(due, key=lambda n: n[:3]):
                 if now - onset > LATE_S:
                     self.late += 1
                     continue
                 if pitch in self.sounding:
                     self._release(pitch, now)
                 together = [n[2] for n in due if n[0] == onset and n[3] == hand]
-                velocity = given or dynamics(pitch, hand, together, self.line, self.level, accompanying, self.rng)
-                if hand != 'left':
+                velocity = dynamics(pitch, hand, together, self.line, self.level, accompanying, self.rng)
+                if hand == 'right':
                     self.line.append(pitch)
+                ring = max(duration * RING, duration + RING_S)
+                if hand == 'bass':   # a double bass: each note stops the one before, and no pedal
+                    if self.bass in self.sounding:
+                        self._release(self.bass, now)
+                    self.bass, ring = pitch, duration
                 self.midi_rec.play_midi_message([0x90, pitch, velocity], is_generated=True)
-                self.sounding[pitch] = (now, now + max(duration * RING, duration + RING_S), velocity)
+                self.sounding[pitch] = (now, now + ring, velocity)
 
     def _click(self, now):
         """Clicks the beat that is due: the model's beats fall on k * 60 / bpm seconds after the connection opened."""
         beat = 60 / self.bpm
         if self.click_at is not None and now >= self.click_at:
             if now - self.click_at < LATE_S:
-                click = CLICK[round((self.click_at - self.started) / beat) % BAR > 0]
+                click = CLICK[round((self.click_at - self.bar_at) / beat) % BAR > 0]
                 self.midi_rec.play_midi_message([0x90, click, CLICK_VELOCITY], channel=DRUMS)
                 self.midi_rec.play_midi_message([0x80, click, 0], channel=DRUMS)
             self.click_at = None
         if self.click_at is None:
-            self.click_at = self.started + math.floor((now - self.started) / beat + 1) * beat
+            self.click_at = self.bar_at + math.floor((now - self.bar_at) / beat + 1) * beat
 
     def stop(self, now):
         with self.lock:
@@ -222,17 +232,20 @@ def connect(address):
     host, port = address.rsplit(':', 1)
     sock = socket.create_connection((host, int(port)))
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    print(f"Playing with the AMT model at {address}")
+    sock.sendall(b"hello\n")   # the duo begins now, not at your first key: over a tune it may start by itself
+    print(f"Playing with the model's server at {address} (its log says which model)")
     return sock, time.monotonic()
 
 
 if __name__ == "__main__":
     codeK = Setup()
     myPort = codeK.perform_setup()
-    codeK.open_port(myPort)
-    keyboard = codeK.port_name(myPort)
+    keyboard = None                # no MIDI keyboard: the laptop's, in the piano roll
+    if myPort is not None:
+        codeK.open_port(myPort)
+        keyboard = codeK.port_name(myPort)
 
-    midiRec = CK_rec(myPort, 0x90, debug=False)
+    midiRec = CK_rec()
     midiRec.set_input_instrument(INPUT_PROGRAM)
     midiRec.set_generated_instrument(GENERATED_PROGRAM)
     for channel, controls in ((midiRec.input_channel, INPUT_CONTROLS), (midiRec.generated_channel, GENERATED_CONTROLS)):
@@ -244,7 +257,7 @@ if __name__ == "__main__":
     def listen():
         for line in sock.makefile('r'):
             duo.receive(line)
-        print("The AMT server closed the duo")
+        print("The model's server closed the duo")
 
     threading.Thread(target=listen, daemon=True).start()
 
@@ -263,7 +276,11 @@ if __name__ == "__main__":
             midiRec.play_midi_message([0xB0 | midiRec.input_channel, PEDAL, velocity])
             duo.sustain(velocity, time.monotonic())
 
-    codeK.set_callback(on_midi)
+    if keyboard:
+        codeK.set_callback(on_midi)
+    keys = rtmidi.MidiIn()         # the laptop's keyboard, which the piano roll plays into this port of ours (M)
+    keys.open_virtual_port(KEYS)
+    keys.set_callback(on_midi)
     # run_duet.sh starts us in the background, where SIGINT is ignored: stop and save on SIGINT or SIGTERM anyway
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, signal.default_int_handler)
@@ -276,7 +293,9 @@ if __name__ == "__main__":
             duo.tick(now)
             if now - looked > PLUG_S:
                 looked = now
-                if plugged and not codeK.present(keyboard):
+                if not keyboard:
+                    pass
+                elif plugged and not codeK.present(keyboard):
                     plugged = False
                     print("Keyboard unplugged: waiting for it to come back")
                     # its last note-offs never came: let go of the keys and the pedal it was holding
@@ -290,6 +309,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     finally:
+        keys.close_port()
         codeK.end()
         duo.stop(time.monotonic())
         sock.close()

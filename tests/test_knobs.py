@@ -18,7 +18,7 @@ class MindTest(unittest.TestCase):
             self.sent.append(knob)
             self.mind.send(knob)
 
-        for name, (low, high, default) in {'min_step': (5, 60, 20), 'space': (10, 150, 50),
+        for name, (low, high, default) in {'min_step': (5, 60, 20), 'max_rest': (50, 800, 200),
                                            'apart': (0.0, 6.0, 2.0), 'lead': (0.0, 6.0, 3.0),
                                            'echo': (0.0, 6.0, 3.0)}.items():
             self.mind.knobs[name] = knobs.Knob(name, default, low, high, default, '', '', isinstance(low, int),
@@ -35,18 +35,9 @@ class MindTest(unittest.TestCase):
         self.assertEqual(knobs.along((60, 20, 8), 0.0), 60)
         self.assertEqual(knobs.along((60, 20, 8), 0.75), 14)
         self.macro('density').set(1.0)
-        self.assertEqual((self.mind.knobs['min_step'].value, self.mind.knobs['space'].value), (8, 15))
+        self.assertEqual((self.mind.knobs['min_step'].value, self.mind.knobs['max_rest'].value), (8, 100))
         self.assertEqual(self.macro('density').shown(), 'dense')
-        self.assertEqual({k.name for k in self.sent}, {'min_step', 'space'})
-
-    def test_a_knob_is_dimmed_while_what_it_shapes_is_not_happening(self):
-        self.mind.state = {'mode': 'accompanying', 'key': 'C major', 'chord': 'G7', 'bpm': 92,
-                           'active': ['out_of_key', 'space', 'apart']}
-        self.assertTrue(self.mind.active(self.macro('role')))
-        self.assertFalse(self.mind.active(self.macro('dialogue')))
-        self.assertTrue(self.mind.active(self.mind.knobs['space']))
-        self.assertFalse(self.mind.active(self.mind.knobs['echo']))
-        self.assertEqual(self.mind.status(), 'C major · G7 · 92 bpm · accompanying you')
+        self.assertEqual({k.name for k in self.sent}, {'min_step', 'max_rest'})
 
     def test_what_you_turn_is_kept_for_next_time(self):
         self.macro('role').set(0.0)
@@ -58,33 +49,21 @@ class MindTest(unittest.TestCase):
         self.macro('role').set(1.0)                 # leads
         again = knobs.Mind(None, self.path)
         again.sock = DummySocket()
-        again.saved['knobs'] = {'space': 30}        # as if only space had ever been turned
+        again.saved['knobs'] = {'min_step': 30}     # as if only min_step had ever been turned
         served = {name: knobs.Knob(name, default, 0, 150, default, '', '', False, again.send)
-                  for name, default in (('space', 50.0), ('apart', 2.0), ('lead', 3.0))}
+                  for name, default in (('min_step', 20.0), ('apart', 2.0), ('lead', 3.0))}
         again._restore(served)
-        self.assertEqual({name: knob.value for name, knob in served.items()}, {'space': 30, 'apart': 0.0, 'lead': 6.0})
-        self.assertEqual(again.saved['knobs'], {'space': 30})   # it goes on following its control
-
-    def test_a_preset_sets_its_controls_and_knobs_and_the_next_one_puts_back_what_it_leaves_out(self):
-        self.mind.knobs['space'].value = 90
-        presets = {preset[0]: preset for preset in self.mind.presets()}
-        self.mind.play(presets['call & response'])
-        self.assertEqual((self.macro('dialogue').value, self.mind.knobs['space'].value), (1.0, 150))
-        self.assertTrue(self.mind.playing(presets['call & response']))
-        self.mind.play(presets['it solos'])
-        self.assertAlmostEqual(self.mind.knobs['space'].value, knobs.along((150, 50, 15), 0.8))   # density's, again
-        self.assertEqual(self.macro('dialogue').value, 0.3)
-        self.assertFalse(self.mind.playing(presets['call & response']))
-        self.mind.play(presets['duet'])
-        self.assertEqual(self.mind.knobs['space'].value, 50)
-        self.assertTrue(all(m.value == 0.5 for m in self.mind.macros))
+        self.assertEqual({name: knob.value for name, knob in served.items()}, {'min_step': 30, 'apart': 0.0, 'lead': 6.0})
+        self.assertEqual(again.saved['knobs'], {'min_step': 30})   # it goes on following its control
 
     def test_a_choice_shows_its_name(self):
-        scale = knobs.Knob('scale', 3, 0, 3, 0, 'choice:yours/major/natural_minor/harmonic_minor', '', True, print)
-        self.assertEqual(scale.shown(), 'harmonic minor')
-        self.assertEqual(scale.step(), 1)
+        part = knobs.Knob('part', 3, 0, 3, 1, 'choice:comps/duet/solos/trades', '', True, print)
+        self.assertEqual(part.shown(), 'trades')
+        self.assertEqual(part.step(), 1)
+        tune = knobs.Knob('chart', 2, 1, 3, 1, 'choice:autumn_leaves/blues_in_f/misty', '', True, print)
+        self.assertEqual(tune.shown(), 'blues in f')   # the tunes count from 1: there is always one
         bpm = knobs.Knob('bpm', 0, 0, 240, 0, 'bpm', '', True, print)
-        self.assertEqual(bpm.shown(), 'yours')
+        self.assertEqual(bpm.shown(), "the tune's")
         bpm.value = 96
         self.assertEqual(bpm.shown(), '96 bpm')
 
@@ -112,12 +91,31 @@ class PanelTest(unittest.TestCase):
         for kind in (self.pygame.MOUSEBUTTONDOWN, self.pygame.MOUSEBUTTONUP):
             self.panel.handle(self.pygame.event.Event(kind, pos=pos, button=1), (0, 0))
 
-    def test_what_the_model_hears_and_does_reads_as_cells(self):
+    def test_where_the_tune_is_reads_as_cells(self):
         mind = knobs.Mind(None, os.path.join(self.tmp.name, 'other.json'))
         self.assertIsNone(mind.readout())
-        mind.state = {'mode': 'alone', 'key': 'D minor', 'chord': None, 'bpm': None, 'active': []}
-        self.assertEqual(mind.readout(), [('Key', 'D minor'), ('Chord', '—'), ('Tempo', '—'),
-                                          ('AI', 'playing on its own')])
+        mind.state = {'doing': 'alone', 'key': 'Misty', 'chord': None, 'bpm': None}
+        self.assertEqual(mind.readout(), [('Tune', 'Misty'), ('Chord', '—'), ('Tempo', '—')])
+
+    def test_the_metronome_is_beside_play_and_a_click_turns_it_on_and_off(self):
+        mind = self.panel.mind
+        for name, low, high, unit in (('chart', 1, 3, 'choice:autumn_leaves/blues_in_f/misty'),
+                                      ('playing', 0, 1, 'choice:stopped/playing'), ('metronome', 0, 1, 'choice:off/on'),
+                                      ('part', 0, 3, 'choice:comps/duet/solos/trades'),
+                                      ('lowest', 0, 8, 'octave_from'), ('highest', 0, 8, 'octave_to')):
+            mind.knobs[name] = knobs.Knob(name, low, low, high, low, unit, '', True, mind.send)
+        self.panel.tab = 0                           # Play
+        card = lambda name: next(rect for kind, what, rect in self.panel.targets if kind == 'card' and what[0] == name)
+        self.panel.draw(self.surface)
+        play, click = card('Play'), card('Metronome')
+        self.assertEqual(click.y, play.y)            # on Play's row, to its right
+        self.assertGreater(click.x, play.right)
+        self.click(click.center)
+        self.assertEqual(mind.knobs['metronome'].value, 1)
+        self.panel.draw(self.surface)
+        self.click(card('Metronome').center)
+        self.assertEqual(mind.knobs['metronome'].value, 0)
+        self.assertEqual(mind.knobs['playing'].value, 0)   # and the tune still waits for Play
 
     def test_a_steppers_arrows_step_it(self):
         box = self.target('stepper', 'instrument')

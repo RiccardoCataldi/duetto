@@ -59,6 +59,16 @@ class DuoTest(unittest.TestCase):
         self.duo.tick(102.0 + 0.5 + main.RING_S)
         self.assertIn(([0x80, 67, 0], True), self.out.messages)
 
+    def test_its_walking_bass_plays_one_note_at_a_time_and_does_not_ring(self):
+        self.duo.receive("note 2.000 0.900 41 bass\n")
+        self.duo.receive("note 2.500 0.400 43 bass\n")
+        self.duo.tick(102.0)
+        self.duo.tick(102.5)   # the next note stops the one before, as on a double bass
+        played = [(m[0] & 0xF0, m[1]) for m, generated in self.out.messages if generated]
+        self.assertEqual(played, [(0x90, 41), (0x80, 41), (0x90, 43)])
+        self.duo.tick(102.5 + 0.4)   # as long as it was written: no pedal
+        self.assertIn(([0x80, 43, 0], True), self.out.messages)
+
     def test_a_cut_drops_the_notes_that_have_not_sounded(self):
         for line in ("note 2.000 0.200 60\n", "note 2.500 0.200 62\n", "note 3.000 0.200 64\n"):
             self.duo.receive(line)
@@ -100,7 +110,7 @@ class DuoTest(unittest.TestCase):
 
     def test_it_plays_louder_when_you_do(self):
         levels = []
-        for loud in (40, 120):
+        for loud in (80, 127):
             out = Out()
             duo = main.Duo(self.sent.append, out, started=100.0, rng=random.Random(0))
             for i in range(6):
@@ -110,10 +120,9 @@ class DuoTest(unittest.TestCase):
             levels.append([m[2] for m, generated in out.messages if generated][0])
         self.assertGreater(levels[1], levels[0] + 30)
 
-    def test_it_strikes_its_keys_as_hard_as_the_model_says_when_it_says(self):
-        self.duo.receive("note 2.000 0.500 60 right 110\n")
-        self.duo.tick(102.0)
-        self.assertEqual(self.generated_velocities(), {60: 110})
+    def test_it_does_not_follow_a_soft_keyboard_into_a_whisper(self):
+        soft = main.dynamics(60, 'right', [60], [], 30, False, random.Random(0))
+        self.assertEqual(soft, main.dynamics(60, 'right', [60], [], main.QUIETEST, False, random.Random(0)))
 
     def test_its_line_swells_as_it_rises(self):
         line = [60, 62, 64, 65, 67, 69, 71, 72]
@@ -135,6 +144,13 @@ class DuoTest(unittest.TestCase):
             self.duo.tick(100.0 + ms / 1000)
             clicks += [(ms, m[1]) for m, channel in self.out.messages if channel == main.DRUMS and m[0] == 0x90]
         self.assertEqual(clicks, [(1500, 77), (2000, 76), (2500, 77), (3000, 77)])   # beat 4 is the second bar's first
+        self.duo.receive("tempo 120 1 0.250\n")         # a chart that began at 0.25 s: its bars count from there
+        clicks = []
+        for ms in range(3300, 4400, 2):
+            self.out.messages = []
+            self.duo.tick(100.0 + ms / 1000)
+            clicks += [(ms, m[1]) for m, channel in self.out.messages if channel == main.DRUMS and m[0] == 0x90]
+        self.assertEqual(clicks, [(3750, 77), (4250, 76)])
         self.duo.receive("tempo 120 0\n")
         self.out.messages = []
         self.duo.tick(103.5)

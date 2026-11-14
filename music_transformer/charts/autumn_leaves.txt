@@ -1,0 +1,7 @@
+title: Autumn Leaves
+key: G minor
+bpm: 120
+Cm7 | F7 | Bbmaj7 | Ebmaj7 | Am7b5 | D7 | Gm6 | % |
+Cm7 | F7 | Bbmaj7 | Ebmaj7 | Am7b5 | D7 | Gm6 | % |
+Am7b5 | D7 | Gm6 | % | Cm7 | F7 | Bbmaj7 | Ebmaj7 |
+Am7b5 | D7 | Gm7 C7 | Fm7 Bb7 | Ebmaj7 | Am7b5 D7 | Gm6 | % |
