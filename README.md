@@ -2,6 +2,10 @@
 
 [![tests](https://github.com/RiccardoCataldi/duetto/actions/workflows/tests.yml/badge.svg)](https://github.com/RiccardoCataldi/duetto/actions/workflows/tests.yml) [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE)
 
+![The model alone over a blues in F at 190 bpm: walking bass, comping and a solo that quotes the great soloists](samples/duo/blues-190.gif)
+
+▶ **[With sound: a blues in F at 190 bpm](samples/duo/blues-190.mp4)**, the model alone, three choruses.
+
 Play a MIDI keyboard and a transformer plays a second piano with you, in real time. Pick a tune from a Real Book and it plays it with you: walking bass, comping, solos. It listens like a partner: it comps while you play, solos when you rest, answers your phrases and quotes them back.
 
 The model is the pretrained [Anticipatory Music Transformer](https://github.com/jthickstun/anticipation) (AMT), on a PC with a GPU; the laptop handles the keyboard, the sound and the piano roll.
