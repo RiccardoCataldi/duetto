@@ -584,6 +584,21 @@ class DuoSessionTest(unittest.TestCase):
             # you played last over a ii-V, a semitone up: its `echo` is at the top. The piano roll says whose it is
             self.assertEqual((back(first, 8, 7), back(second, 9, 1), 'you' in whose), (recall > 0,) * 3, (part, recall))
 
+    def test_a_soloists_run_too_fast_for_the_tempo_is_not_quoted_and_no_quoted_note_sounds_into_the_next(self):
+        from music_transformer import licks
+        library = {'players': [['a horn', 'a ballad']], 'licks': {'min.0.4': [
+            [0, [[0, 0.5, 0], [0.25, 0.5, 3], [0.5, 0.5, 7], [0.75, 0.5, 10]]],     # sixteenths
+            [0, [[0, 1.5, 0], [1, 1.5, 3], [2, 1.5, 7], [3, 1.5, 10]]]]}}           # quarters, held into the next
+        chords = [(0, 'm7')] * 32
+        quote = lambda fastest: {tuple(at for at, *_ in licks.quote(library, random.Random(seed), chords, 60, 96, 72,
+                                                                    fastest=fastest)[1]) for seed in range(20)}
+        self.assertEqual(quote(0), {(0, 0.25, 0.5, 0.75), (0, 1, 2, 3)})
+        self.assertEqual(quote(0.32), {(0, 1, 2, 3)})        # at 240 bpm: 0.08 s
+        with unittest.mock.patch.dict(licks.DATA, library):
+            session, _ = self.solo(9, licks=1, bpm=240, vary=0, pickup=0)   # a beat is 25 ticks
+        phrases = [notes for notes in session.quotes.values() if notes]
+        self.assertTrue(phrases and all([lasts for *_, lasts in notes][:3] == [20] * 3 for notes in phrases))
+
     def test_over_a_tune_its_eighths_are_swung(self):
         session = DuoSession(UniformModel(), 'cpu', clock=Clock(), chart=self.tune('autumn_leaves'), playing=1, part=0,
                              breath=0, min_step=5)

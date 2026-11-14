@@ -85,14 +85,16 @@ def vary(lick, bars, rng):
     return [[at, lasts, 2 * lick[0][2] - pitch if how == 3 else pitch] for at, lasts, pitch in lick]
 
 
-def quote(library, rng, chords, low, high, near, like=None, most=LONGEST):
+def quote(library, rng, chords, low, high, near, like=None, most=LONGEST, fastest=0):
     """A phrase of `library` (DATA's form) to play over `chords`, the (root, kind in listener.CHORDS) of each beat
     of the bars to come: one played whole over the same chords from the first bar on, a fourth up or a tone down as
     they may be, `most` bars long at most. Of the lengths someone played over these chords (four bars of a
     ii-V-I-IV, three of a ii-V-I, a turnaround, one bar...), it takes the one that leaves the bars after it to the
     fewest phrases: it ends where the next progression begins, and the longest of those. By the soloist named
     `like` when there is one of theirs. Of DRAWN of them, drawn with `rng`, the one whose first note goes on best
-    from the pitch `near`, the last of its line, in the octave that keeps it from `low` to `high` (place).
+    from the pitch `near`, the last of its line, in the octave that keeps it from `low` to `high` (place). A phrase
+    with two notes less than `fastest` beats apart is left out: a horn's run from a slower tune, a blur at this one's
+    tempo.
     Returns ("who · the tune", [(beats from the bar line, beats it lasts, pitch), ...], the bars it lasts), or None
     when nothing was played over these chords."""
     under = [(root, kind_of(kind)) for root, kind in chords]
@@ -100,7 +102,9 @@ def quote(library, rng, chords, low, high, near, like=None, most=LONGEST):
 
     @functools.cache
     def played(first, bars):
-        return library['licks'].get(key_of(under[4 * first:4 * (first + bars)]), ()) if first + bars <= end else ()
+        licks = library['licks'].get(key_of(under[4 * first:4 * (first + bars)]), ()) if first + bars <= end else ()
+        return [lick for lick in licks if all(b[0] - a[0] > fastest - 1e-6 for a, b in zip(lick[1], lick[1][1:]))] \
+            if fastest else licks
 
     @functools.cache
     def phrases(first):

@@ -73,6 +73,9 @@ BASS = (28, BASS_TOP - 1)   # and its walking bass: from E1
 UNDER = (52, 69)  # the chords it comps under its own solo: from E3 to A4, as a pianist's left hand
 STAB = 3          # their notes
 LATE = 6          # ticks: a note of a phrase it quotes may be this late and still be played
+FASTEST = 0.08    # seconds: a soloist's phrase with two notes closer than this at the tune's tempo is not quoted
+DETACHED = 0.8    # a note of a phrase it quotes lasts this much of the time to the next, at most: a horn's legato
+                  # line, on a piano, would sound its notes one over the other
 WALK = 4.0        # logit added to the root where its walking bass begins a bar or a chord
 BOSSA = (0, 1.5, 2, 3.5)   # beats of the bar its bass plays on over a bossa: 1, the and of 2, 3, the and of 4
 LEGATO = 0.75     # how often its bass over a bossa holds a note until the next; the others last half as long
@@ -358,8 +361,8 @@ class DuoSession:
             elif slot == 1 and comp and bool(torch.isfinite(comp[3][self.seq[-1] - TIME_OFFSET])):   # a short chord
                 beat = round(60 / self.pace * TIME_RESOLUTION)
                 mask[DUR_OFFSET + min(10, beat // 2):DUR_OFFSET + min(beat + beat // 2, MAX_DUR - 1) + 1] = 0
-            elif slot == 1 and quote and self.seq[-1] - TIME_OFFSET == quote[0]:   # about as long as it was played
-                mask[DUR_OFFSET + max(quote[2] // 2, 1):DUR_OFFSET + min(2 * quote[2], MAX_DUR - 1) + 1] = 0
+            elif slot == 1 and quote and self.seq[-1] - TIME_OFFSET == quote[0]:   # as long as it was played, or shorter
+                mask[DUR_OFFSET + max(quote[2] // 2, 1):DUR_OFFSET + min(quote[2], MAX_DUR - 1) + 1] = 0
             elif slot == 1:
                 mask[DUR_OFFSET:DUR_OFFSET + MAX_DUR] = 0
             else:
@@ -528,7 +531,9 @@ class DuoSession:
         or any of them; the others a great soloist's, by the one it last quoted when they played these chords too,
         and the one that goes on best from where its line left off (licks.place). As often as `vary` says, instead,
         it plays again the phrase it quoted last, or your last, whatever the chords, to develop it (licks.vary).
-        While it comps (`solos` False) it quotes you only, where its line would be. It plays it as it was played,
+        While it comps (`solos` False) it quotes you only, where its line would be. A soloist's is one whose notes
+        are FASTEST apart or more at this tempo, and each note of it ends before the next (DETACHED): a piano's
+        line, not a horn's. It plays it as it was played,
         in the key of the tune, swung as the tune is, its notes on the beat within the scale of these chords unless
         its harmony is outside (licks.fit); what you make it sample again it plays again.
         Once a phrase that ends in this bar is over, or from the bar's last UPBEAT beats when it quotes none here,
@@ -560,8 +565,8 @@ class DuoSession:
             ahead = 4 - bar % 4 if self.part == 3 else licks.LONGEST   # trading fours: no further than its four
             # by chance, but never far from its share of the bars so far
             owed = self.licks >= 1 or self.licks * (self.quoted[1] + 1) - self.quoted[0] > rng.uniform(-1.5, 1.5)
-            quote = lambda library: licks.quote(
-                library, rng, chords, low, high, near, self.quoting and self.quoting[0].split(' · ')[0], ahead)
+            quote = lambda library, fastest=0: licks.quote(
+                library, rng, chords, low, high, near, self.quoting and self.quoting[0].split(' · ')[0], ahead, fastest)
             found = None
             if self.licks > 0 and owed:
                 if solos and self.motif and self.motif[2] <= ahead and rng.random() < self.vary:
@@ -573,7 +578,7 @@ class DuoSession:
                     found = quote({'players': [['you']], 'licks': {
                         under: mine[-1:] if last else mine for under, mine in self.yours.items()}})
                 if not found and solos:
-                    found = quote(licks.DATA)
+                    found = quote(licks.DATA, FASTEST / beat)
                     if found:   # the phrase it may develop next, free of its key as a Lick is
                         self.motif = (found[0], [[at_, lasts, pitch - chords[0][0]] for at_, lasts, pitch in found[1]],
                                       found[2])
@@ -588,6 +593,10 @@ class DuoSession:
                 self.quoting = (found[0], phrase[-1][0])
                 if before and solos and rng.random() < self.pickup:
                     phrase = self._pickup(before[-1], bar * chart.BEATS + found[1][0][0], phrase[0][1]) + phrase
+                # detached: no note sounds into the next
+                gap = lambda k: next((round((after - phrase[k][0]) * TIME_RESOLUTION * DETACHED)
+                                      for after, *_ in phrase[k + 1:] if after > phrase[k][0] + 0.01), MAX_DUR)
+                phrase = [(seconds, pitch, max(min(lasts, gap(k)), 1)) for k, (seconds, pitch, lasts) in enumerate(phrase)]
             self.quotes = {b: notes for b, notes in self.quotes.items() if b >= bar - licks.LONGEST}
             self.quotes.update({bar + k: phrase for k in range(found[2] if found else 1)})
             if solos:   # `licks` is a share of its solo: the bars it comps are not owed any
