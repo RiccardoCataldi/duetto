@@ -20,9 +20,28 @@ _Avoid_: running, started
 The bar of clicks before a Tune's first bar.
 
 **Part**:
-What the model plays over a Tune: **Comps**, **Solos**, **Duet** (comps while you play, solos when you rest) or
-**Trade fours**.
+What the model plays over a Tune: **Comps**, **Solos** or **Duet** (comps while you play, solos when you rest).
 _Avoid_: role (that is a Character control), preset
+
+**Style**:
+How any Tune is played: **Swing** (swung eighths, a walking bass), **Bossa** (even eighths, a bossa's bass) or
+**Even 8ths** (even eighths, a walking bass). Yours to choose, as in iReal Pro: a Tune never says its own.
+_Avoid_: genre, feel, groove (that is a Character control)
+
+**Voice**:
+One of the three things the model plays, each on its own MIDI channel and instrument: its **solo** (its line, or a
+Lick it quotes), its **chords** (what it comps, under you or under its own solo) and its **bass**.
+_Avoid_: hand (that is how the model's rules see them), track, part (that is what it plays over a Tune)
+
+**Band**:
+The instruments of the three Voices: a preset (piano trio, vibes, two pianos) or one chosen for each. It changes the
+sound only, never the notes.
+_Avoid_: ensemble, mode
+
+**Player**:
+The top of the panel, always in sight: Play/Stop, where the Tune is, a light on each beat, the tempo and the
+metronome.
+_Avoid_: transport bar
 
 ### Shaping it
 

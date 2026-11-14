@@ -1,10 +1,12 @@
 """
 A piano roll of the duo: your notes and the model's rise from the keyboard as you play.
 
-    python pianoroll.py                                   # live, next to main.py (F: fullscreen, K: knobs, Esc: quit)
+    python pianoroll.py                                   # live, next to main.py (Space: play/stop, M: metronome,
+                                                          # F: fullscreen, K: knobs, Esc: quit)
     python pianoroll.py video duo.mid --audio duo.ogg -o duo.mp4
 
-Live, it listens to what main.py sends to FluidSynth on Midi Through: channel 0 is you, channel 1 the model;
+Live, it listens to what main.py sends to FluidSynth on Midi Through: channel 0 is you, channels 1, 4 and 5 the
+model's solo, chords and bass, each in its colour;
 the knobs beside it (knobs.py) turn the model's on its server while you play.
 """
 import argparse
@@ -18,7 +20,7 @@ import mido
 import pygame
 
 import theme
-from theme import AI, FAINT, MUTED, TEXT, YOU, mix
+from theme import AI, BASS, CHORDS, FAINT, MUTED, TEXT, YOU, mix
 
 SIZE = (1280, 720)
 FPS = 60                  # live
@@ -36,7 +38,8 @@ BLACK_KEY = (28, 30, 38)
 FELT = (112, 30, 44)      # the strip of red felt over the keys
 GRID = (255, 255, 255, 12)
 
-PLAYERS = {0: ('You', 'piano', YOU), 1: ('AI', 'piano', AI)}
+# who plays on each channel (sound.py's): you, and the model's voices; a duo saved before it had three is all 'AI'
+PLAYERS = {0: ('You', 'piano', YOU), 1: ('Solo', 'piano', AI), 4: ('Chords', 'piano', CHORDS), 5: ('Bass', 'bass', BASS)}
 KEYS = 'duetto keys'      # main.py's MIDI port for the laptop's keyboard
 # the laptop's keyboard as a piano, as in Ableton Live: a row of white keys with the black ones above it, from C
 NOTE_KEYS = {key: step for step, key in enumerate('awsedftgyhujkolp')}
@@ -117,6 +120,7 @@ class Roll:
             alpha = round(255 * (1 - y / (height // 3)) ** 2)
             self.fade.fill((*BACKGROUND[0], alpha), pygame.Rect(0, y, width, 1))
         self.glow = {c: glow_sprite(colour) for c, (_, _, colour) in PLAYERS.items()}
+        self.playing = tuple(PLAYERS)   # the channels named at the top: those that play
         self.instruments = {}     # channel -> the instrument it plays, if not PLAYERS'
         self.readout = None       # where the tune is, shown at the top: (what, as it stands)
         self.chart = None         # the tune it plays over: {'title', 'bars': [[chord, ...], ...], 'bar', 'beat'}
@@ -165,12 +169,14 @@ class Roll:
         screen.blit(self.header, (0, 0))
         width = self.size[0]
         x = 28
-        for channel, (name, instrument, colour) in PLAYERS.items():
+        for channel in self.playing:
+            name, instrument, colour = PLAYERS[channel]
+            name = 'AI' if channel == 1 and len(self.playing) == 2 else name   # all of it, on one instrument
             instrument = self.instruments.get(channel, instrument)
             pygame.draw.circle(screen, colour, (x + 5, 31), 5)
             label = theme.text(screen, name, 15, TEXT, (x + 18, 21), bold=True)
-            sub = theme.text(screen, theme.fit(instrument, 12, 170), 12, MUTED, (x + 18, label.bottom + 1))
-            x = max(label.right, sub.right) + 30
+            sub = theme.text(screen, theme.fit(instrument, 12, 130), 12, MUTED, (x + 18, label.bottom + 1))
+            x = max(label.right, sub.right) + 24
         right = width - 28
         if clock is not None:
             stamp = theme.text(screen, f"{int(clock) // 60}:{int(clock) % 60:02d}", 15, TEXT, (right, 21), bold=True,
@@ -395,6 +401,9 @@ def live(port_name, server):
             if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:   # no key of the laptop's piano
                 panel.mind.transport()
                 continue
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_m:       # nor is M
+                panel.mind.click()
+                continue
             if event.type == pygame.KEYDOWN and event.key in (pygame.K_f, pygame.K_k, pygame.K_F11, pygame.K_TAB):
                 if event.key in (pygame.K_f, pygame.K_F11):
                     pygame.display.toggle_fullscreen()
@@ -425,6 +434,7 @@ def video(midi_path, audio, out):
     length = max(n[1] for n in notes) + TAIL_S
     screen = pygame.Surface(SIZE)
     roll = Roll(SIZE, octaves(notes))
+    roll.playing = tuple(channel for channel in PLAYERS if channel < 2 or any(n[3] == channel for n in notes))
     command = [imageio_ffmpeg.get_ffmpeg_exe(), '-y', '-loglevel', 'error',
                '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{SIZE[0]}x{SIZE[1]}', '-r', str(VIDEO_FPS), '-i', '-']
     if audio:

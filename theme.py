@@ -13,7 +13,9 @@ TEXT = (232, 235, 243)
 MUTED = (146, 152, 172)
 FAINT = (86, 92, 114)
 YOU = (255, 176, 84)        # amber
-AI = (94, 214, 230)         # teal
+AI = (94, 214, 230)         # teal: its solo
+CHORDS = (167, 139, 250)    # violet: its chords
+BASS = (110, 205, 140)      # green: its bass
 
 FONTS = ('notosans', 'dejavusans', 'freesans')   # the first one installed; pygame's own if none
 _fonts, _texts = {}, {}

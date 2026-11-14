@@ -78,7 +78,8 @@ DETACHED = 0.8    # a note of a phrase it quotes lasts this much of the time to 
                   # line, on a piano, would sound its notes one over the other
 WALK = 4.0        # logit added to the root where its walking bass begins a bar or a chord
 BOSSA = (0, 1.5, 2, 3.5)   # beats of the bar its bass plays on over a bossa: 1, the and of 2, 3, the and of 4
-LEGATO = 0.75     # how often its bass over a bossa holds a note until the next; the others last half as long
+LEGATO = 0.9      # how often its bass over a bossa holds a note until the next; the others last three quarters as
+                  # long. Walking, it holds every note until the next: a bass line is legato
 EARLY = 0.15      # beats before a bar line your phrase may begin and still begin at it: you rushed, it is no upbeat
 RISE = 12         # semitones its solo's register rises from where it begins to its height, at the top of its `arc`
 
@@ -125,9 +126,11 @@ KNOBS = {
     'arc': (0.6, 0.0, 1.0, '', "how much its solo builds over a chorus (three of a blues): from eighths, short phrases "
             "and the low of its register up to faster runs, longer and higher, three quarters through, and down "
             "again; 0: the same all through"),
-    'part': (1, 0, 3, 'choice:comps/duet/solos/trades', "it comps, with a walking bass, for you to solo; "
-             "duet: it comps while you play and solos when you rest; it solos as a jazz player does, for you to comp; "
-             "or you trade fours: four bars of your solo, then four of its own"),
+    'part': (1, 0, 2, 'choice:comps/duet/solos', "it comps, with a walking bass, for you to solo; "
+             "duet: it comps while you play and solos when you rest; or it solos as a jazz player does, for you to comp"),
+    'style': (0, 0, len(chart.STYLES) - 1, 'choice:' + '/'.join(chart.STYLES), "the feel it plays any tune in: "
+              "swing, swung eighths over a walking bass; bossa, even eighths over a bossa's bass; even 8ths, even "
+              "eighths over a walking bass"),
 }
 
 
@@ -184,9 +187,7 @@ class DuoSession:
         if self.base is not None and self.heard_at is not None:
             now = self.now()
             at = self._seconds(now)
-            if self.part == 3:
-                doing = 'its turn' if self._solos(at, False) else 'your turn'
-            elif now - self.heard_at < PLAYING:
+            if now - self.heard_at < PLAYING:
                 doing = 'accompanying'
             elif now - self.heard_at < self.answer and len(self.listener.phrase(at)) > 1:
                 doing = 'answering'
@@ -204,8 +205,6 @@ class DuoSession:
 
     def _solos(self, at, you_play):
         """Whether it solos at session seconds `at`; otherwise it comps."""
-        if self.part == 3:   # trading fours: yours first, counted on through the choruses
-            return int(chart.beats(self, at) // chart.BEATS) // 4 % 2 == 1
         return self.part == 2 or (self.part == 1 and not you_play)
 
     def octaves(self):
@@ -274,8 +273,9 @@ class DuoSession:
 
     @torch.no_grad()
     def play(self):
-        """Samples the model's next note: (onset, duration, pitch, hand) in session seconds, hand 'right', or 'bass'
-        for its walking bass."""
+        """Samples the model's next note: (onset, duration, pitch, voice) in session seconds; its voice is 'solo' (its
+        line, or a phrase it quotes), 'chords' (what it comps, under you or under its own solo) or 'bass': each may
+        sound as an instrument of its own."""
         self._fit()
         now, last = self.now(), self._last_time()
         you_play = self.heard_at is not None and now - self.heard_at < PLAYING
@@ -388,9 +388,9 @@ class DuoSession:
                                                                        instrument == self.comp)
             token = int(torch.multinomial(torch.softmax(nucleus(logits + mask, self.top_p), -1), 1))
             self.seq.append(token)
-        if self._bossa() and self._instrument(self.seq[-1]) == self.left:
+        if self._instrument(self.seq[-1]) == self.left:
             self._tie()
-        return self._played()
+        return self._played(solos or bool(quote))
 
     def _stab(self, earliest):
         """The ticks (first, last) at which the chord it owes next under its own solo may begin, or None: the other
@@ -408,15 +408,17 @@ class DuoSession:
                     return max(tick, earliest), tick + self.grid
         return None
 
-    def _played(self):
-        """The note just sampled, once it has joined what it has said."""
+    def _played(self, line=False):
+        """The note just sampled, once it has joined what it has said; `line`: its right hand plays a line, not
+        chords."""
         time_, duration, note = self.seq[-3:]
         onset, pitch = self._seconds(time_ - TIME_OFFSET), (note - NOTE_OFFSET) % MAX_PITCH
         if self._instrument(note) not in (self.left, self.comp):   # its walking bass and the chords under its solo
                                                                    # are no part of its phrases
             self.spoken = self.spoken[-256:] + [onset]
-        hand = 'bass' if self._instrument(note) == self.left else 'right'
-        return onset, (duration - DUR_OFFSET) / TIME_RESOLUTION, pitch, hand
+        voice = 'bass' if self._instrument(note) == self.left else 'solo' if line and self._instrument(note) == self.me \
+            else 'chords'
+        return onset, (duration - DUR_OFFSET) / TIME_RESOLUTION, pitch, voice
 
     def _tick(self, seconds):
         return round(seconds * TIME_RESOLUTION) - self.base
@@ -475,7 +477,7 @@ class DuoSession:
         if feel == 0:
             return mask
         beat = 60 / self.pace
-        swung = feel in (None, 2) and chart.CHARTS[self.chart - 1].swing   # eighths, swung
+        swung = feel in (None, 2) and chart.swung(self)   # eighths, swung
         unit = beat / 3 if swung else beat / (feel or 2)   # swung: the beat in three, its first third and its last
         first = math.ceil((self._seconds(earliest) - self.began) / unit - self.grid / (unit * TIME_RESOLUTION))
         grid = torch.full_like(mask, -float('inf'))
@@ -552,9 +554,8 @@ class DuoSession:
                     if played < tick < MAX_TIME and tick >= earliest - LATE]
 
         if solos and bar in self.quotes and self.quotes.get(bar + 1) is not self.quotes[bar] and not coming(bar) \
-                and (self.quotes[bar] or chart.beats(self, at) % chart.BEATS >= chart.BEATS - licks.UPBEAT) \
-                and self._solos(self.began + ((bar + 1) * chart.BEATS + 0.01) * beat, False):
-            bar += 1   # (trading fours, the next bar may be yours: then it leads nowhere)
+                and (self.quotes[bar] or chart.beats(self, at) % chart.BEATS >= chart.BEATS - licks.UPBEAT):
+            bar += 1
         if bar not in self.quotes:
             self._learn()
             start, rng = self.began + bar * chart.BEATS * beat, random.Random(self.varied * 7 + bar)
@@ -562,7 +563,7 @@ class DuoSession:
             before = self.quotes.get(bar - 1)   # the phrase that ends where this one begins
             near = before[-1][1] if before else (line[-1][1] - NOTE_OFFSET) % MAX_PITCH if line else (low + high) // 2
             chords = [chart.bar_at(self, start + (k + 0.01) * beat)[1][:2] for k in range(2 * licks.LONGEST * chart.BEATS)]
-            ahead = 4 - bar % 4 if self.part == 3 else licks.LONGEST   # trading fours: no further than its four
+            ahead = licks.LONGEST
             # by chance, but never far from its share of the bars so far
             owed = self.licks >= 1 or self.licks * (self.quoted[1] + 1) - self.quoted[0] > rng.uniform(-1.5, 1.5)
             quote = lambda library, fastest=0: licks.quote(
@@ -587,7 +588,7 @@ class DuoSession:
                 notes = found[1]
                 if 2 * self.out_of_key >= OUT_OF_KEY:   # inside: over these chords, not those it was played over
                     notes = licks.fit(notes, lambda at_: self.listener.chord_scale(start + (at_ + 0.01) * beat))
-                swing = chart.CHARTS[self.chart - 1].swing   # an eighth off the beat falls on its last third
+                swing = chart.swung(self)   # an eighth off the beat falls on its last third
                 phrase = [(start + (at_ + (1 / 6 if swing and abs(at_ % 1 - 0.5) < 0.04 else 0)) * beat, pitch,
                            max(round(lasts * beat * TIME_RESOLUTION), 1)) for at_, lasts, pitch in notes]
                 self.quoting = (found[0], phrase[-1][0])
@@ -610,7 +611,7 @@ class DuoSession:
         """The notes, as a phrase's, that lead from `last`, the last note of the phrase it quoted, into the pitch
         `target`, the first of the next, `at` beats into the tune (licks.pickup): eighths, swung as the tune is, the
         last of them an eighth before `target`, in the room the two leave once `last` has sounded."""
-        beat, swing = 60 / self.pace, chart.CHARTS[self.chart - 1].swing
+        beat, swing = 60 / self.pace, chart.swung(self)
         left = (last[0] - self.began) / beat
         first = math.ceil(2 * max(left + 0.3, left + last[2] / TIME_RESOLUTION / beat - 0.25))   # eighths into the tune
         final = math.floor(2 * (at - 0.45))
@@ -672,17 +673,18 @@ class DuoSession:
         return bias
 
     def _tie(self):
-        """Its bass's note just sampled over a bossa held until its next, as a bassist ties them (LEGATO of the
-        time), or half as long: its duration in the context is changed, and fed again."""
+        """Its bass's note just sampled held until its next, as a bassist ties them: always when it walks, LEGATO of
+        the time over a bossa, where the others last three quarters as long. Its duration in the context is changed,
+        and fed again."""
         tick = self.seq[-3] - TIME_OFFSET
         gap = self._bass_due(tick + 1, tick) - tick
-        length = gap if random.random() < LEGATO else max(gap // 2, 1)
+        length = gap if not self._bossa() or random.random() < LEGATO else max(gap * 3 // 4, 1)
         self.seq[-2] = DUR_OFFSET + min(length, MAX_DUR - 1)
         self._crop(len(self.seq) - 2)
 
     def _bossa(self):
-        """Whether its bass plays a bossa's figure (BOSSA) over the tune instead of walking."""
-        return chart.CHARTS[self.chart - 1].bass == 'bossa'
+        """Whether its bass plays a bossa's figure (BOSSA) over the tune instead of walking: its Style says."""
+        return chart.bossa(self)
 
     def _bass_due(self, earliest, played):
         """The tick of the next note its bass owes from `earliest`, its last having been at `played`: on every beat,
@@ -772,6 +774,8 @@ class DuoSession:
         return -self.lead * ((middle - PITCHES) / 12).clamp(0, 1)
 
     def _logits(self):
+        if self.fed >= len(self.seq):   # nothing new since the cache was cropped (Stop took its last notes out): the
+            self._crop(len(self.seq) - 1)   # model is given its last token again, never none
         inp = torch.tensor([self.seq[self.fed:]], device=self.device)
         out = self.model(inp, past_key_values=self.past, use_cache=True)
         self.past, self.fed = out.past_key_values, len(self.seq)
@@ -813,8 +817,9 @@ class DuoSession:
     def _crop(self, length):
         """The KV cache keeps at most seq[:length]; the rest is fed again."""
         if self.fed > length:
-            self.past.crop(length)
-            self.fed = length
+            if length > 0:
+                self.past.crop(length)
+            self.past, self.fed = self.past if length > 0 else None, max(length, 0)
 
     def _fit(self):
         """Keeps the context under CONTEXT_SIZE tokens and its times under MAX_TIME."""

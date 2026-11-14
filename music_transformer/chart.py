@@ -1,10 +1,10 @@
 """
 A chart, as in a Real Book: the chords of a tune bar by bar, in 4/4, for the duo to play over with a metronome.
 The duo always plays over one: the first, until another is chosen.
-A file in charts/ is a few `name: value` lines (title, key as "G minor", bpm, feel: straight for even eighths
-instead of swung ones, bass: bossa for a bossa's bass instead of a walking one) and then the bars, between `|`: one or
+A file in charts/ is a few `name: value` lines (title, key as "G minor", bpm) and then the bars, between `|`: one or
 more chords each, sharing the bar equally; `%` is the bar before again. Chords are spelt as in a Real Book or
 iReal Pro (Cm7, C-7, F7b9, C7#5, Bbmaj7, B^7, Am7b5, Aø, Gm6, C7/E...) and heard as the nearest of listener.CHORDS.
+A chart says nothing of how it is played: the Style is yours to choose, as in iReal Pro, whatever the tune.
 """
 import glob
 import math
@@ -17,6 +17,19 @@ from music_transformer.listener import CHORDS
 ROOTS = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
 COUNT = 1   # bars of metronome before a chart begins: the count-in
 BEATS = 4   # shortcut: every chart is in 4/4; give a chart its own `meter` when one in 3/4 is wanted
+# the Styles any tune can be played in (the session's `style` knob): swung eighths over a walking bass; even eighths
+# over a bossa's bass (root and fifth on 1, the and of 2, 3, the and of 4); even eighths over a walking bass
+STYLES = ('swing', 'bossa', 'even_8ths')
+
+
+def swung(session):
+    """Whether the session's eighths are swung: the second of each beat on its last third."""
+    return STYLES[session.style] == 'swing'
+
+
+def bossa(session):
+    """Whether the session's bass plays a bossa's figure instead of walking."""
+    return STYLES[session.style] == 'bossa'
 
 
 def chord(name):
@@ -45,17 +58,11 @@ class Chart:
     def __init__(self, path):
         self.name = os.path.splitext(os.path.basename(path))[0]
         self.title, self.bpm, self.key, self.bars = self.name.replace('_', ' '), 120, None, []
-        self.swing = True   # its eighths are swung: the second of each beat on its last third
-        self.bass = 'walk'  # its bass: a note a beat, or 'bossa': root and fifth on 1, the and of 2, 3, the and of 4
         with open(path) as f:
             for line in f:
                 head, _, value = line.partition(':')
-                if value and head.strip() in ('title', 'key', 'bpm', 'feel', 'bass'):
-                    if head.strip() == 'feel':
-                        self.swing = value.strip() != 'straight'
-                    elif head.strip() == 'bass':
-                        self.bass = value.strip()
-                    elif head.strip() == 'title':
+                if value and head.strip() in ('title', 'key', 'bpm'):
+                    if head.strip() == 'title':
                         self.title = value.strip()
                     elif head.strip() == 'bpm':
                         self.bpm = int(value)
@@ -117,8 +124,8 @@ STABS = ((), (), (0,), (0,), (1.5,), (1.5,), (0, 1.5), (0, 2.5), (1.5, 3.5), (3.
 
 def stabs(session, bar):
     """The beats from the line of the bar `bar` (counted on through the choruses) on which it comps a chord under
-    its own solo: others, by chance, each bar; an "and" on the last third of its beat when the tune swings."""
-    swing = CHARTS[session.chart - 1].swing
+    its own solo: others, by chance, each bar; an "and" on the last third of its beat when its Style swings."""
+    swing = swung(session)
     return [spot + (1 / 6 if swing and spot % 1 else 0) for spot in random.Random(session.varied * 13 + 5 + bar).choice(STABS)]
 
 
@@ -173,12 +180,14 @@ def reading(session, state):
     state['chord'] = f"{here[2]} > {bar_at(session, now + BEATS * 60 / session.pace)[1][2]}"
     state['bpm'] = session.pace
     state['chart'] = {'title': tune.title, 'bars': [[name for *_, name in chords] for chords in tune.bars],
-                      'bar': bar, 'beat': int(max(now - session.began, 0) * session.pace / 60 % BEATS)}
+                      'bar': bar, 'beat': int(max(now - session.began, 0) * session.pace / 60 % BEATS),
+                      'at': (now - session.began) * session.pace / 60}   # beats since its first bar, for the lights
     quoting = getattr(session, 'quoting', None)
     if quoting and now < quoting[1]:   # whose phrase it is playing
         state['chart']['quote'] = quoting[0]
     if not session.playing:   # stopped: its page, no bar lit
         state['key'], state['chord'], state['chart']['bar'] = tune.title, None, -1
+        del state['chart']['at']
     elif now < session.began:   # the count-in: no bar yet, and the beats still to go
         left = int((session.began - now) * session.pace / 60) + 1
         state['key'], state['chart']['bar'], state['chart']['count'] = f"{tune.title} in {left}", -1, left

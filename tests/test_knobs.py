@@ -57,9 +57,11 @@ class MindTest(unittest.TestCase):
         self.assertEqual(again.saved['knobs'], {'min_step': 30})   # it goes on following its control
 
     def test_a_choice_shows_its_name(self):
-        part = knobs.Knob('part', 3, 0, 3, 1, 'choice:comps/duet/solos/trades', '', True, print)
-        self.assertEqual(part.shown(), 'trades')
+        part = knobs.Knob('part', 2, 0, 2, 1, 'choice:comps/duet/solos', '', True, print)
+        self.assertEqual(part.shown(), 'solos')
         self.assertEqual(part.step(), 1)
+        style = knobs.Knob('style', 2, 0, 2, 0, 'choice:swing/bossa/even_8ths', '', True, print)
+        self.assertEqual(style.shown(), 'even 8ths')
         tune = knobs.Knob('chart', 2, 1, 3, 1, 'choice:autumn_leaves/blues_in_f/misty', '', True, print)
         self.assertEqual(tune.shown(), 'blues in f')   # the tunes count from 1: there is always one
         bpm = knobs.Knob('bpm', 0, 0, 240, 0, 'bpm', '', True, print)
@@ -78,14 +80,15 @@ class PanelTest(unittest.TestCase):
         self.engine = DummyEngine(sound.defaults())
         self.panel = knobs.Panel(None, self.engine, os.path.join(self.tmp.name, 'mind.json'))
         self.panel.tab = 1                           # your sound: it needs no server
-        self.surface = pygame.Surface((knobs.PANEL_W, 720))
+        self.surface = pygame.Surface((knobs.PANEL_W, 1500))   # tall enough for the whole tab
         self.panel.draw(self.surface)
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def target(self, kind, name):
-        return next(rect for k, what, rect in self.panel.targets if k == kind and what.name == name)
+    def target(self, kind, name, title=None):
+        return next(rect for k, what, rect in self.panel.targets
+                    if k == kind and what.name == name and what.title == title)
 
     def click(self, pos):
         for kind in (self.pygame.MOUSEBUTTONDOWN, self.pygame.MOUSEBUTTONUP):
@@ -97,28 +100,84 @@ class PanelTest(unittest.TestCase):
         mind.state = {'doing': 'alone', 'key': 'Misty', 'chord': None, 'bpm': None}
         self.assertEqual(mind.readout(), [('Tune', 'Misty'), ('Chord', '—'), ('Tempo', '—')])
 
-    def test_the_metronome_is_beside_play_and_a_click_turns_it_on_and_off(self):
+    def served(self):
+        """The Play tab's knobs, as the server gives them."""
         mind = self.panel.mind
+        mind.sock = DummySocket()
         for name, low, high, unit in (('chart', 1, 3, 'choice:autumn_leaves/blues_in_f/misty'),
                                       ('playing', 0, 1, 'choice:stopped/playing'), ('metronome', 0, 1, 'choice:off/on'),
-                                      ('part', 0, 3, 'choice:comps/duet/solos/trades'),
+                                      ('bpm', 0, 240, 'bpm'), ('part', 0, 2, 'choice:comps/duet/solos'),
+                                      ('style', 0, 2, 'choice:swing/bossa/even_8ths'),
                                       ('lowest', 0, 8, 'octave_from'), ('highest', 0, 8, 'octave_to')):
             mind.knobs[name] = knobs.Knob(name, low, low, high, low, unit, '', True, mind.send)
-        self.panel.tab = 0                           # Play
-        card = lambda name: next(rect for kind, what, rect in self.panel.targets if kind == 'card' and what[0] == name)
+        return mind
+
+    def card(self, name):
         self.panel.draw(self.surface)
-        play, click = card('Play'), card('Metronome')
-        self.assertEqual(click.y, play.y)            # on Play's row, to its right
-        self.assertGreater(click.x, play.right)
-        self.click(click.center)
+        return next(rect for kind, what, rect in self.panel.targets if kind == 'card' and what[0] == name)
+
+    def test_the_player_is_on_top_whichever_the_tab_and_the_metronome_turns_on_and_off(self):
+        mind = self.served()
+        for tab in (0, 1):
+            self.panel.tab = tab
+            self.assertLess(self.card('Play').bottom, knobs.PLAYER_H)
+            self.assertLess(self.card('Metronome').bottom, knobs.PLAYER_H)
+        self.click(self.card('Metronome').center)
         self.assertEqual(mind.knobs['metronome'].value, 1)
-        self.panel.draw(self.surface)
-        self.click(card('Metronome').center)
+        self.click(self.card('Metronome').center)
         self.assertEqual(mind.knobs['metronome'].value, 0)
         self.assertEqual(mind.knobs['playing'].value, 0)   # and the tune still waits for Play
+        self.click(self.card('Play').center)
+        self.assertEqual(mind.knobs['playing'].value, 1)
+        self.assertIsNotNone(self.card('Stop'))
+
+    def test_the_tempo_steps_from_the_one_it_keeps_to_and_a_new_tune_takes_its_own(self):
+        mind = self.served()
+        mind.state = {'bpm': 110, 'chart': {'title': 'Blues in F', 'bars': [['F7']] * 12, 'bar': -1, 'beat': 0}}
+        self.click(self.card('Faster').center)
+        self.assertEqual(mind.knobs['bpm'].value, 111)   # from the tune's 110, not from 0
+        self.click(self.card('Slower').center)
+        self.click(self.card('Slower').center)
+        self.assertEqual(mind.knobs['bpm'].value, 109)
+        self.click(self.card('Tempo').center)
+        self.assertEqual(mind.knobs['bpm'].value, 0)     # the tune's again
+        mind.tempo(-500)
+        self.assertEqual(mind.knobs['bpm'].value, knobs.SLOWEST)
+        mind.knobs['chart'].set(2)
+        self.assertEqual(mind.knobs['bpm'].value, 0)
+
+    def test_the_lights_run_on_at_the_tempo_from_the_last_state_heard(self):
+        mind = self.served()
+        self.assertIsNone(mind.beat())                   # stopped
+        mind.state, mind.heard = {'bpm': 120, 'chart': {'at': -2.5}}, 100.0
+        from unittest import mock
+        with mock.patch('time.monotonic', return_value=100.0):
+            self.assertEqual(mind.beat(), (1, True))     # the count-in's second beat
+        with mock.patch('time.monotonic', return_value=101.5):
+            self.assertEqual(mind.beat(), (0, False))    # three beats on: the tune's first
+
+    def test_the_style_is_chosen_on_the_play_tab_and_there_is_no_trading(self):
+        mind = self.served()
+        self.panel.tab = 0
+        self.click(self.card('bossa').center)
+        self.assertEqual(mind.knobs['style'].value, 1)
+        names = {what[0] for kind, what, _ in self.panel.targets if kind == 'card'}
+        self.assertTrue({'swing', 'bossa', 'even 8ths', 'comps', 'duet', 'solos'} <= names)
+        self.assertNotIn('trade fours', names)
+        self.assertEqual(len(self.panel.tabs), 2)        # Play and Sound: no Advanced
+
+    def test_a_band_puts_each_voice_of_the_model_on_its_instrument(self):
+        import sound
+        self.click(self.card('two pianos').center)             # its bass on a piano too
+        self.assertEqual(self.engine.calls[-1], (sound.BASS, 'instrument', 0))
+        self.click(self.card('vibes').center)                  # vibraphone over piano and double bass
+        self.assertEqual(self.engine.calls[-2:], [(sound.AI, 'instrument', 11), (sound.BASS, 'instrument', 32)])
+        box = self.target('stepper', 'instrument', 'bass')    # or one by one
+        self.click((box.right - 5, box.centery))
+        self.assertEqual(self.engine.calls[-1], (sound.BASS, 'instrument', 33))
 
     def test_a_steppers_arrows_step_it(self):
-        box = self.target('stepper', 'instrument')
+        box = self.target('stepper', 'instrument', 'you')
         self.click((box.right - 5, box.centery))
         self.click((box.right - 5, box.centery))
         self.assertEqual(self.engine.calls[-1], (0, 'instrument', 2))

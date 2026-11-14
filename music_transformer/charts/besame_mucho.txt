@@ -1,8 +1,6 @@
 title: Besame Mucho
 key: D minor
 bpm: 110
-feel: straight
-bass: bossa
 Dm | % | Gm6 | % | Dm | % | A7 | % |
 Dm | D7 | Gm | Gm6 | Dm | E7 | A7 | % |
 Gm6 | % | Dm | % | E7 | % | A7 | % |

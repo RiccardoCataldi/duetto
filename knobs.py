@@ -1,12 +1,14 @@
 """
-The controls beside the piano roll, in two tabs:
-- Play: the Tune, Play or Stop with the metronome beside it, the Part it plays; the Character (density, harmony,
-  role...), each control turning some of the model's Knobs (see music_transformer/server.py, "knobs"); the octaves
-  it may play
-- Sound: your piano's and its own in FluidSynth on this laptop (sound.py)
-F2 opens Advanced: the model's Knobs, each on its own. Drag a
-slider (Shift: finely), click a stepper's arrows, press the arrow keys or turn the wheel with Ctrl over either; a
-double click puts it back. The wheel scrolls the tab.
+The controls beside the piano roll. On top, always in sight, the player, as in iReal Pro: Play or Stop, the Tune and
+where it is, a light on each beat of the bar (amber through the count-in), the tempo and the metronome. Below, two
+tabs:
+- Play: the Tune, its Style (swing, bossa, even 8ths: yours to choose, whatever the tune), the Part it plays; the
+  Character (density, harmony, role...), each control turning some of the model's Knobs (see
+  music_transformer/server.py, "knobs"); the octaves it may play
+- Sound: the band (its solo, its chords and its bass, each on an instrument of its own: a preset, or one by one) and
+  the sound of each and of your piano in FluidSynth on this laptop (sound.py)
+Drag a slider (Shift: finely), click a stepper's arrows, press the arrow keys or turn the wheel with Ctrl over
+either; a double click puts it back. The wheel scrolls the tab.
 """
 import json
 import math
@@ -19,11 +21,13 @@ import pygame
 import pygame.gfxdraw
 
 import sound
-from theme import AI, FAINT, HOVER, LINE, MUTED, RAISED, SELECTED, SURFACE, TEXT, YOU, capital, fit, mix, text, wrap
+from theme import AI, BASS, CHORDS, FAINT, HOVER, LINE, MUTED, RAISED, SELECTED, SURFACE, TEXT, YOU, capital, fit, mix, \
+    text, wrap
 
 PANEL_W = 380
 PAD = 20                  # the panel's margins
-HEADER_H = 68             # the tabs
+PLAYER_H = 206            # the player, on top
+HEADER_H = 56             # the tabs, under it
 FOOTER_H = 96             # what the control under the mouse does
 TITLE_H = 40              # a section's title
 SLIDER_H = 52
@@ -64,27 +68,25 @@ MACROS = [
 ]
 # the Parts over the Tune: name, the value of the knob `part`, what it plays
 PARTS = [('comps', 0, "it comps, with a walking bass, for you to solo"),
-         ('solos', 2, "it solos as a jazz player does, for you to comp"),
          ('duet', 1, "it comps while you play and solos when you rest"),
-         ('trade fours', 3, "four bars of your solo, then four of its own")]
+         ('solos', 2, "it solos as a jazz player does, for you to comp")]
+# the Styles, in the order of the knob `style` (music_transformer/chart.py, STYLES): name, how it plays any tune
+STYLES = [('swing', "swung eighths over a walking bass"),
+          ('bossa', "even eighths over a bossa's bass: root and fifth on 1, the and of 2, 3, the and of 4"),
+          ('even 8ths', "even eighths over a walking bass")]
+SLOWEST = 40              # bpm the player's tempo goes down to
+LIGHTS_H = 12             # the player's beat lights
 
-# the sections of Advanced, and of each piano's sound
-ADVANCED = [('Tune', ('chart', 'playing', 'part', 'licks', 'pickup', 'vary', 'recall', 'arc', 'bpm', 'metronome')),
-            ('Timing', ('min_step', 'max_rest', 'run', 'answer', 'grid', 'phrase', 'breath', 'commit')),
-            ('Harmony', ('out_of_key', 'chord_tone', 'tension', 'stay')),
-            ('Texture', ('chord', 'no_repeat')),
-            ('Role & dialogue', ('apart', 'lead', 'echo')),
-            ('Imagination', ('temperature', 'top_p', 'self_window')),
-            ('Range', ('lowest', 'highest'))]
-SOUND_GROUPS = [('Mix', ('volume', 'pan', 'reverb')),
-                ('Envelope', ('attack', 'decay', 'sustain', 'release')), ('Delay', ('echo', 'delay', 'feedback'))]
+# who plays, in the Sound tab: the channel (sound.py), who it is, its colour (the piano roll's)
+VOICES = [(sound.YOU, 'you', YOU), (sound.AI, 'solo', AI), (sound.CHORDS, 'chords', CHORDS), (sound.BASS, 'bass', BASS)]
 
 
 class Knob:
     """`turned(knob)` is called whenever what it shows changes (a musical control: whenever it moves)."""
 
-    def __init__(self, name, value, low, high, default, unit, what, whole, turned, ends=None):
+    def __init__(self, name, value, low, high, default, unit, what, whole, turned, ends=None, title=None, accent=None):
         self.name, self.unit, self.what, self.whole, self.turned, self.ends = name, unit, what, whole, turned, ends
+        self.title, self.accent = title, accent   # what it is called, if not its name; its colour, if not its tab's
         self.value, self.low, self.high, self.default = float(value), float(low), float(high), float(default)
 
     def set(self, value):
@@ -130,7 +132,7 @@ class Knob:
         return f"{value:.3f}" if self.high - self.low < 0.5 else f"{value:.2f}"
 
     def label(self):
-        return 'tune' if self.name == 'chart' else self.name.replace('_', ' ')
+        return self.title or ('tune' if self.name == 'chart' else self.name.replace('_', ' '))
 
     def share(self):
         return (self.value - self.low) / (self.high - self.low)
@@ -151,6 +153,7 @@ class Mind:
         self.address, self.path = address, path
         self.knobs = {}           # name -> Knob, once connected
         self.state = None         # the last DuoSession.state() heard
+        self.heard = 0.0          # when, in time.monotonic() seconds
         self.sock = None
         self.lock = threading.Lock()
         try:
@@ -186,7 +189,7 @@ class Mind:
                 self._restore(knobs)
                 for line in lines:
                     if line.startswith('state '):
-                        self.state = json.loads(line[6:])
+                        self.state, self.heard = json.loads(line[6:]), time.monotonic()
             except (OSError, ValueError):
                 pass
             with self.lock:
@@ -218,6 +221,8 @@ class Mind:
             return
         if knob.name == 'chart' and 'playing' in self.knobs:
             self.knobs['playing'].set(0)   # another tune waits for Play
+            if 'bpm' in self.knobs:
+                self.knobs['bpm'].set(0)   # at its own tempo, until you fix another
         if keep and knob.name != 'playing':   # a tune never starts by itself
             self._saved('knobs')[knob.name] = knob.value
             self._save()
@@ -233,6 +238,27 @@ class Mind:
         """Turns the metronome on, or off."""
         if 'metronome' in self.knobs:
             self.knobs['metronome'].set(1 - self.knobs['metronome'].value)
+
+    def tempo(self, by=None):
+        """Fixes the tempo `by` bpm faster (slower, when negative) than the one it keeps to; None: the tune's again."""
+        if 'bpm' not in self.knobs:
+            return
+        bpm = self.knobs['bpm']
+        if by is None:
+            bpm.set(0)
+            return
+        now = bpm.value or (self.state or {}).get('bpm') or 120
+        bpm.set(min(max(round(now) + by, SLOWEST), bpm.high))
+
+    def beat(self):
+        """(the beat of the bar it is on, from 0, and whether it is the count-in's), or None while the tune is
+        stopped: from the last state heard, run on at the tempo since."""
+        state = self.state or {}
+        at = (state.get('chart') or {}).get('at')
+        if at is None or not state.get('bpm'):
+            return None
+        at += (time.monotonic() - self.heard) * state['bpm'] / 60
+        return int(at % 4), at < 0
 
     def _macro(self, macro):
         for name, anchors in self.turns[macro.name].items():
@@ -260,13 +286,14 @@ class Mind:
                 ('Tempo', f"{state['bpm']} bpm" if state['bpm'] else '—')]
 
 
-def sound_knobs(engine, player):
-    """The knobs of `player`'s sound in `engine`."""
-    knobs = []
-    for name, (*defaults, low, high, unit, what) in sound.SOUND.items():
-        default = defaults[player]
-        knobs.append(Knob(name, engine.sound[player][name], low, high, default, unit, what, isinstance(default, int),
-                          lambda knob: engine.set(player, knob.name, knob.value)))
+def sound_knobs(engine, player, who, accent):
+    """The knobs of `player`'s sound in `engine`, by name: `who` it is names its instrument, and all are its colour."""
+    knobs = {}
+    for name, (*_, low, high, unit, what) in sound.SOUND.items():
+        default = sound.defaults()[player][name]
+        knobs[name] = Knob(name, engine.sound[player][name], low, high, default, unit, what, isinstance(default, int),
+                           lambda knob: engine.set(player, knob.name, knob.value),
+                           title=who if name == 'instrument' else None, accent=accent)
     return knobs
 
 
@@ -277,15 +304,10 @@ class Panel:
     def __init__(self, address, engine, mind_file=MIND_FILE):
         self.mind = Mind(address, mind_file)
         self.address = address
-        yours, its = sound_knobs(engine, sound.YOU), sound_knobs(engine, sound.AI)
-        # title, colour, its sections (title, knobs or cards) once there are knobs; Advanced only while F2 shows it
-        self.tabs = [('Play', AI, self._play_sections),
-                     ('Sound', YOU, lambda: self._groups([('Your piano', ('instrument',)), *SOUND_GROUPS],
-                                                         {k.name: k for k in yours}) +
-                                            self._groups([('Its piano', ('instrument',)), *SOUND_GROUPS],
-                                                         {k.name: k for k in its})),
-                     ('Advanced', AI, lambda: self._groups(ADVANCED, self.mind.knobs))]
-        self.tab, self.advanced = 0, False
+        self.sounds = {player: sound_knobs(engine, player, who, accent) for player, who, accent in VOICES}
+        # title, colour, its sections (title, knobs or cards) once there are knobs
+        self.tabs = [('Play', AI, self._play_sections), ('Sound', YOU, self._sound_sections)]
+        self.tab = 0
         self.scroll = [0] * len(self.tabs)
         self.held = None          # (knob, x where the drag started, value then, pixels across its range)
         self.hover = None         # the target under the mouse: (kind, what, rect)
@@ -300,23 +322,30 @@ class Panel:
         knobs = self.mind.knobs
         if not knobs:
             return None
-        part, playing, click = knobs['part'], knobs['playing'].value, knobs['metronome'].value
+        part, style = knobs['part'], knobs['style']
         return [('', [knobs['chart']]),
-                ('', [('Stop' if playing else 'Play', 'Space bar: the tune from a bar of count-in, or stop it',
-                       bool(playing), self.mind.transport),
-                      ('Metronome', 'A click on each beat while the tune plays', bool(click), self.mind.click)]),
+                ('Style', [(name, capital(what), style.value == value, lambda value=value: style.set(value))
+                           for value, (name, what) in enumerate(STYLES)]),
                 ('Part', [(name, what, part.value == value, lambda value=value: part.set(value))
                           for name, value, what in PARTS]),
                 ('Character', self.mind.macros),
                 ('Octaves', [knobs['lowest'], knobs['highest']])]
 
-    def _groups(self, groups, knobs):
-        if not knobs:
-            return None
-        placed = {n for _, names in groups for n in names}
-        sections = [(title, [knobs[n] for n in names if n in knobs]) for title, names in groups]
-        sections.append(('Other', [k for n, k in knobs.items() if n not in placed]))
-        return [(title, ks) for title, ks in sections if ks]
+    def _sound_sections(self):
+        """The band: a preset (sound.BANDS) or an instrument for each of its voices, and yours; then each one's
+        sound."""
+        band = [self.sounds[player]['instrument'] for player in (sound.AI, sound.CHORDS, sound.BASS)]
+
+        def choose(programs):
+            for knob, program in zip(band, programs):
+                knob.set(program)
+
+        cards = [(name, 'Its solo on {}, its chords on {}, its bass on {}'.format(*(sound.GM[p] for p in programs)),
+                  tuple(round(knob.value) for knob in band) == programs, lambda programs=programs: choose(programs))
+                 for name, programs in sound.BANDS]
+        return [('Band', cards), ('Instruments', band + [self.sounds[sound.YOU]['instrument']])] + [
+            (f"{who} sound" if player else 'Your sound', [knob for name, knob in self.sounds[player].items()
+                                                           if name != 'instrument']) for player, who, _ in VOICES]
 
     def _rows(self, sections):
         """(kind, what, height) of each row of the tab: a section's title, cards, a slider or steppers side by
@@ -325,7 +354,7 @@ class Panel:
         for title, knobs in sections:
             rows.append(('title', title, TITLE_H if title else 12))
             if knobs and isinstance(knobs[0], tuple):   # cards: (name, what, chosen, choose)
-                rows.append(('cards', knobs, math.ceil(len(knobs) / 2) * (CARD_H + 8)))
+                rows.append(('cards', knobs, math.ceil(len(knobs) / across(knobs)) * (CARD_H + 8)))
                 continue
             pair = []
             for knob in knobs:
@@ -358,10 +387,7 @@ class Panel:
                 self._scroll(-event.y * 48)
             return
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_F2:   # no key of the laptop's piano
-                self.advanced = not self.advanced
-                self.tab, self.hover, self.held = 2 if self.advanced else 0, None, None
-            elif self.hover and self.hover[0] in ('slider', 'stepper') and event.key in STEP_KEYS:
+            if self.hover and self.hover[0] in ('slider', 'stepper') and event.key in STEP_KEYS:
                 knob = self.hover[1]
                 knob.set(knob.value + STEP_KEYS[event.key] * knob.step())
             elif event.key in (pygame.K_PAGEUP, pygame.K_PAGEDOWN):
@@ -427,8 +453,9 @@ class Panel:
         surface.fill(SURFACE)
         pygame.draw.line(surface, LINE, (0, 0), (0, height))
         self.targets = []
+        self._player(surface, width)
         self._tabs(surface, width)
-        self.content = pygame.Rect(0, HEADER_H, width, height - HEADER_H - FOOTER_H)
+        self.content = pygame.Rect(0, PLAYER_H + HEADER_H, width, height - PLAYER_H - HEADER_H - FOOTER_H)
         _, accent, sections = self.tabs[self.tab]
         sections = sections()
         if sections is None:
@@ -438,12 +465,105 @@ class Panel:
             self._sections(surface, self._rows(sections), accent, width)
         self._footer(surface, width, height)
 
+    def _player(self, surface, width):
+        """The player, as in iReal Pro: Play or Stop, the Tune and where it is, the beat lights, the tempo and the
+        metronome; it is always in sight, whichever the tab."""
+        knobs, state = self.mind.knobs, self.mind.state or {}
+        ready = all(name in knobs for name in ('playing', 'metronome', 'bpm'))
+        playing = ready and bool(knobs['playing'].value)
+        # Play or Stop, large
+        button = pygame.Rect(PAD, 20, 64, 64)
+        play = ('Stop' if playing else 'Play', 'Space bar: the tune from a bar of count-in, or stop it', playing,
+                self.mind.transport)
+        over = ready and self._over('Play') or self._over('Stop')
+        colour = (mix(AI, TEXT, 0.25) if over else AI) if ready else RAISED
+        pygame.gfxdraw.aacircle(surface, button.centerx, button.centery, 32, colour)
+        pygame.gfxdraw.filled_circle(surface, button.centerx, button.centery, 32, colour)
+        x, y = button.center
+        icon = SURFACE if ready else FAINT
+        if playing:
+            pygame.draw.rect(surface, icon, (x - 10, y - 10, 20, 20), border_radius=3)
+        else:
+            triangle = [(x - 8, y - 13), (x + 14, y), (x - 8, y + 13)]
+            pygame.gfxdraw.aapolygon(surface, triangle, icon)
+            pygame.gfxdraw.filled_polygon(surface, triangle, icon)
+        if ready:
+            self.targets.append(('card', play, button))
+        # the Tune and where it is
+        left = button.right + 18
+        chart = state.get('chart') or {}
+        title = chart.get('title') or ('Connecting to the model' if not knobs else '—')
+        text(surface, fit(title, 18, width - PAD - left, True), 18, TEXT, (left, 26), bold=True)
+        beat = self.mind.beat()
+        if not ready:
+            where = f"AMT server at {self.address}"
+        elif not playing:
+            where = 'Stopped · Space to play'
+        elif chart.get('count'):
+            where = f"Count-in · {chart['count']}"
+        elif chart.get('bar', -1) >= 0:
+            where = f"Bar {chart['bar'] + 1} of {len(chart['bars'])} · {state.get('chord') or ''}"
+        else:
+            where = 'Starting…'
+        text(surface, fit(where, 13, width - PAD - left), 13, MUTED, (left, 54))
+        # a light on each beat of the bar: the one it is on lit, the first a little wider; amber through the count-in
+        lights, gap = pygame.Rect(PAD, 102, width - 2 * PAD, LIGHTS_H), 8
+        each = (lights.width - 3 * gap) / 5
+        for k in range(4):
+            w = each * (2 if k == 0 else 1)
+            light = pygame.Rect(round(lights.x + (each * (k + 1 if k else 0)) + gap * k), lights.y, round(w), LIGHTS_H)
+            lit = beat is not None and beat[0] == k
+            pygame.draw.rect(surface, (YOU if beat[1] else AI) if lit else RAISED, light, border_radius=LIGHTS_H // 2)
+        # the tempo, its arrows a bpm slower or faster (Shift: five), and the metronome
+        y = 132
+        text(surface, 'TEMPO', 11, MUTED, (PAD, y), bold=True)
+        fixed = ready and knobs['bpm'].value > 0
+        if ready:
+            text(surface, 'fixed · click to reset' if fixed else "the tune's", 11, FAINT, (PAD + 52, y))
+        text(surface, 'METRONOME', 11, MUTED, (width - PAD, y), bold=True, anchor='topright')
+        tempo = pygame.Rect(PAD, y + 18, round((width - 2 * PAD) * 0.6), 40)
+        bpm = state.get('bpm')
+        pygame.draw.rect(surface, RAISED, tempo, border_radius=10)
+        shift = lambda: 5 if pygame.key.get_mods() & pygame.KMOD_SHIFT else 1
+        for side, name, what, turn in ((-1, 'Slower', 'One bpm slower (Shift: five)', lambda: self.mind.tempo(-shift())),
+                                       (1, 'Faster', 'One bpm faster (Shift: five)', lambda: self.mind.tempo(shift()))):
+            arrow = pygame.Rect(tempo.x if side < 0 else tempo.right - 44, tempo.y, 44, tempo.height)
+            if ready and self._over(name):
+                pygame.draw.rect(surface, HOVER, arrow, border_radius=10)
+            chevron(surface, arrow.center, side, (TEXT if self._over(name) else MUTED) if ready else FAINT)
+            if ready:
+                self.targets.append(('card', (name, what, False, turn), arrow))
+        middle = tempo.inflate(-88, 0)
+        if ready:
+            self.targets.append(('card', ('Tempo', "Its tempo: the tune's, or one you fix with the arrows; a click "
+                                          "here gives it back the tune's", False, self.mind.tempo), middle))
+        number = text(surface, str(round(bpm)) if bpm else '—', 20, AI if fixed else TEXT,
+                      (middle.centerx - 14, tempo.centery), bold=True, anchor='center')
+        text(surface, 'bpm', 12, MUTED, (number.right + 5, tempo.centery + 2), anchor='midleft')
+        clicks = ready and bool(knobs['metronome'].value)
+        toggle = pygame.Rect(tempo.right + 10, tempo.y, width - PAD - tempo.right - 10, tempo.height)
+        if clicks:
+            pygame.draw.rect(surface, mix(AI, SURFACE, 0.8), toggle, border_radius=10)
+            pygame.draw.rect(surface, AI, toggle, 1, border_radius=10)
+        else:
+            pygame.draw.rect(surface, HOVER if self._over('Metronome') else RAISED, toggle, border_radius=10)
+        pygame.draw.circle(surface, AI if clicks else FAINT, (toggle.x + 18, toggle.centery), 5)
+        text(surface, 'On' if clicks else 'Off', 15, TEXT if clicks else MUTED, (toggle.x + 32, toggle.centery),
+             bold=clicks, anchor='midleft')
+        if ready:
+            self.targets.append(('card', ('Metronome', 'M: a click on each beat while the tune plays', clicks,
+                                          self.mind.click), toggle))
+        pygame.draw.line(surface, LINE, (1, PLAYER_H - 1), (width, PLAYER_H - 1))
+
+    def _over(self, name):
+        """Whether the mouse is over the card called `name`."""
+        return self.hover is not None and self.hover[0] == 'card' and self.hover[1][0] == name
+
     def _tabs(self, surface, width):
-        well = pygame.Rect(PAD, 18, width - 2 * PAD, 34)
+        well = pygame.Rect(PAD, PLAYER_H + 12, width - 2 * PAD, 34)
         pygame.draw.rect(surface, RAISED, well, border_radius=10)
-        tabs = self.tabs if self.advanced else self.tabs[:2]
-        each = well.width / len(tabs)
-        for i, (title, accent, *_) in enumerate(tabs):
+        each = well.width / len(self.tabs)
+        for i, (title, accent, *_) in enumerate(self.tabs):
             rect = pygame.Rect(round(well.x + i * each) + 3, well.y + 3, round(each) - 6, well.height - 6)
             chosen = i == self.tab
             if chosen:
@@ -467,6 +587,7 @@ class Panel:
              anchor='midtop')
 
     def _sections(self, surface, rows, accent, width):
+        placed = len(self.targets)   # the player's and the tabs': always in sight
         total = sum(h for *_, h in rows) + 16
         self.overflow = max(0, total - self.content.height)
         self.scroll[self.tab] = min(self.scroll[self.tab], self.overflow)
@@ -482,8 +603,6 @@ class Panel:
                     self._slider(surface, what, y, accent, width)
                 else:
                     self._steppers(surface, what, y, accent, width)
-            if kind == 'title':   # the Sound tab's pianos, each in its player's colour
-                accent = {'Your piano': YOU, 'Its piano': AI}.get(what, accent)
             y += h
         surface.set_clip(None)
         if self.overflow:
@@ -494,8 +613,8 @@ class Panel:
                     shade.fill((*SURFACE, round(255 * i / 18)))
                     surface.blit(shade, (1, self.content.bottom - 18 + i))
         # only what shows can be clicked
-        self.targets = [(kind, what, rect if kind == 'tab' else rect.clip(self.content))
-                        for kind, what, rect in self.targets if kind == 'tab' or rect.colliderect(self.content)]
+        self.targets[placed:] = [(kind, what, rect.clip(self.content)) for kind, what, rect in self.targets[placed:]
+                                 if rect.colliderect(self.content)]
 
     def _scrollbar(self, surface, total, width):
         track = self.content.inflate(0, -12)
@@ -504,11 +623,13 @@ class Panel:
         pygame.draw.rect(surface, LINE, (width - 7, round(y), 3, round(h)), border_radius=2)
 
     def _cards(self, surface, cards, y, accent, width):
-        each = (width - 2 * PAD - 8) / 2
+        columns = across(cards)
+        each = (width - 2 * PAD - 8 * (columns - 1)) / columns
         for i, card in enumerate(cards):
             name, _, chosen, _ = card
-            rect = pygame.Rect(round(PAD + (i % 2) * (each + 8)), y + (i // 2) * (CARD_H + 8), round(each), CARD_H)
-            over = self.hover is not None and self.hover[0] == 'card' and self.hover[1][0] == name
+            rect = pygame.Rect(round(PAD + (i % columns) * (each + 8)), y + (i // columns) * (CARD_H + 8), round(each),
+                               CARD_H)
+            over = self._over(name)
             if chosen:
                 pygame.draw.rect(surface, mix(accent, SURFACE, 0.8), rect, border_radius=10)
                 pygame.draw.rect(surface, accent, rect, 1, border_radius=10)
@@ -519,6 +640,7 @@ class Panel:
             self.targets.append(('card', card, rect))
 
     def _slider(self, surface, knob, y, accent, width):
+        accent = knob.accent or accent
         held = self.held is not None and self.held[0] is knob
         over = held or (self.hover is not None and self.hover[1] is knob)
         moved = abs(knob.value - knob.default) > (knob.high - knob.low) / 200
@@ -547,9 +669,12 @@ class Panel:
     def _steppers(self, surface, knobs, y, accent, width):
         each = (width - 2 * PAD - 12) / len(knobs)
         for i, knob in enumerate(knobs):
+            accent = knob.accent or accent
             x = round(PAD + i * (each + 12))
             over = self.hover is not None and self.hover[1] is knob
-            text(surface, capital(knob.label()), 12, MUTED, (x, y + 6))
+            label = text(surface, capital(knob.label()), 12, MUTED, (x, y + 6))
+            if knob.title and knob.accent:   # whose instrument: its colour in the piano roll
+                pygame.draw.circle(surface, knob.accent, (label.right + 9, label.centery + 1), 3)
             box = pygame.Rect(x, y + 25, round(each), 34)
             pygame.draw.rect(surface, HOVER if over else RAISED, box, border_radius=8)
             moved = abs(knob.value - knob.default) > 0.01
@@ -572,7 +697,7 @@ class Panel:
         elif self.hover and self.hover[0] == 'card':
             title, what = capital(self.hover[1][0]), capital(self.hover[1][1])
         else:
-            text(surface, f"F2: {'close' if self.advanced else 'open'} Advanced", 12, FAINT, (PAD, height - 30))
+            text(surface, 'Space: play or stop · M: metronome · K: hide', 12, FAINT, (PAD, height - 30))
             return
         text(surface, title, 14, TEXT, (PAD, y + 14), bold=True)
         for i, line in enumerate(wrap(what, 12, width - 2 * PAD)[:3]):
@@ -583,6 +708,11 @@ class Panel:
             return capital(knob.what)
         turns = ', '.join(name.replace('_', ' ') for name in self.mind.turns[knob.name])
         return f"From {knob.ends[0]} to {knob.ends[1]}: {knob.what} (turns {turns})"
+
+
+def across(cards):
+    """How many cards side by side: three in a row of three, two otherwise."""
+    return 3 if len(cards) == 3 else 2
 
 
 def stepped(knob):

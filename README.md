@@ -24,14 +24,23 @@ No MIDI keyboard? The laptop's keys play, as in Ableton Live: `A W S E D F T G Y
 
 ## Playing a tune
 
-Pick a tune in **Play** and its page appears. **Play** (or the space bar) counts it in, **Stop** silences it; it never starts by itself. The **Metronome** is beside it. Choose its **Part**:
+The **player** sits on top of the panel, whichever the tab, as in iReal Pro: **Play** (or the space bar) counts the tune in, **Stop** silences it; it never starts by itself. Beside it the tune and the bar it is on, and under it a light for each beat of the bar (amber through the count-in), the **tempo** (the tune's, or one you fix with the arrows, Shift for five bpm; a click on the number gives it back the tune's) and the **Metronome** (`M`).
+
+Pick a tune in **Play** and its page appears. Choose its **Style**, whatever the tune: a tune is only its chords, and how it is played is yours to choose.
+
+| Style | It plays |
+| --- | --- |
+| **Swing** | swung eighths over a walking bass |
+| **Bossa** | even eighths over a bossa's bass: root and fifth on 1, the and of 2, 3, the and of 4 |
+| **Even 8ths** | even eighths over a walking bass |
+
+And its **Part**:
 
 | Part | It plays |
 | --- | --- |
 | **Comps** | a walking bass and chords on each chord's scale, for you to solo |
 | **Solos** | a bebop line over the changes, for you to comp, quoting the great soloists (the `licks` knob) |
 | **Duet** | comps while you play, solos when you rest |
-| **Trade fours** | four bars yours, four bars its own |
 
 It also quotes **you**: each phrase you play is filed under its chords and comes back wherever those chords return, in any key (*memory*: how often; *dialogue*: how much it prefers your last one). Between two phrases it quotes it may add a pickup into the next (the `pickup` knob). A phrase it quotes is a whole one, from where its soloist began it, upbeat and all, to where they ended it; its line waits for it, it begins near where the line left off, and its notes on the beat are fitted to the tune's chords. Now and then it plays the last one again to develop it: over the next chords, a beat later, its first half or upside down (the `vary` knob). Its solo builds over each chorus: eighths, short phrases and low at first, faster, longer and higher three quarters through (the `arc` knob). Hold a chord that is not the tune's and it follows your reharmonisation (*key follow*: how soon).
 
@@ -39,13 +48,16 @@ It also quotes **you**: each phrase you play is filed under its chords and comes
 
 | Tab | What is there |
 | --- | --- |
-| **Play** | the Tune, Play/Stop and the Metronome; the Part; the Character; the octaves |
-| **Sound** | both pianos in FluidSynth: instrument, volume, pan, envelope, reverb, delay |
-| **Advanced** (F2) | every knob of the model (`KNOBS` in [duo.py](music_transformer/duo.py)) |
+| **Play** | the Tune, its Style, the Part; the Character; the octaves |
+| **Sound** | the Band, then each one's sound in FluidSynth: volume, pan, envelope, reverb, delay |
+
+The model's other knobs (`KNOBS` in [duo.py](music_transformer/duo.py)) keep their defaults, or follow the Character.
+
+The **Band** puts each Voice of the model on an instrument of its own: its **solo**, its **chords** and its **bass**. Pick a preset (piano trio, vibes, two pianos) or an instrument for each; the piano roll shows each in its colour. Only the sound changes: the model plays the same notes.
 
 The **Character** is nine controls: density, harmony, role, dialogue, groove, risk, focus, memory, key follow. Hover one to read what it does.
 
-Keys: `Space` play/stop the tune, `F` (or `F11`) fullscreen, `K` (or `Tab`) hide the panel, `F2` Advanced, `Esc` quit.
+Keys: `Space` play/stop the tune, `M` the metronome, `F` (or `F11`) fullscreen, `K` (or `Tab`) hide the panel, `Esc` quit.
 
 ## Add a tune
 
@@ -58,7 +70,7 @@ bpm: 120
 Cm7 | F7 | Bbmaj7 | Ebmaj7 | Am7b5 | D7 | Gm6 | % |
 ```
 
-Eighths are swung unless the chart says `feel: straight`.
+A chart holds no style: swing, bossa or even eighths is chosen in the panel.
 
 ## How it works
 

@@ -45,14 +45,15 @@ BAR = 4
 
 
 def dynamics(pitch, hand, together, line, level, accompanying, rng=random):
-    """The velocity of one of the model's notes. `together`: the pitches its right hand starts with it,
-    `line`: its right hand's last pitches, `level`: how loud you play, `accompanying`: whether you are playing."""
+    """The velocity of one of the model's notes, of its voice `hand` ('solo', 'chords' or 'bass'). `together`: the
+    pitches that voice starts with it, `line`: its solo's last pitches, `level`: how loud you play, `accompanying`:
+    whether you are playing."""
     velocity = max(level, QUIETEST) * SOFTER * (ACCOMPANY if accompanying else 1)
     if hand in ('left', 'bass'):
         velocity *= LEFT_HAND
     elif len(together) > 1:
         velocity *= TOP if pitch == max(together) else INNER
-    if hand == 'right' and len(line) >= 4 and max(line) > min(line):
+    if hand == 'solo' and len(line) >= 4 and max(line) > min(line):
         height = min(max((pitch - min(line)) / (max(line) - min(line)), 0), 1)
         velocity *= 1 + CONTOUR * (height - 0.5)
     velocity += rng.uniform(-HUMAN, HUMAN)
@@ -73,7 +74,8 @@ class Duo:
         self.started = started
         self.rng = rng
         self.lock = threading.Lock()
-        self.notes = []                # (onset, offset, pitch, velocity, generated) in time.monotonic() seconds
+        self.notes = []                # (onset, offset, pitch, velocity, the model's channel or False for yours) in
+                                       # time.monotonic() seconds
         self.held = {}                 # pitch -> (onset, velocity), the keys you hold down
         self.pedaled = {}              # pitch -> (onset, velocity), the keys you let go that the pedal holds
         self.pedal = False
@@ -81,10 +83,11 @@ class Duo:
         self.durations = deque(maxlen=16)
         self.level = 80                # how loud you play
         self.played_at = None          # when you last pressed a key
-        self.pending = []              # the model's notes not started yet: (onset, duration, pitch, hand)
-        self.sounding = {}             # pitch -> (onset, offset, velocity) of the model's notes
+        self.pending = []              # the model's notes not started yet: (onset, duration, pitch, voice)
+        self.sounding = {}             # (channel, pitch) -> (onset, offset, velocity) of the model's notes: each of
+                                       # its voices (solo, chords, bass) on its own channel, its own instrument
         self.bass = None               # the pitch its walking bass sounds: one at a time
-        self.line = deque(maxlen=CONTOUR_NOTES)   # its right hand's last pitches
+        self.line = deque(maxlen=CONTOUR_NOTES)   # its solo's last pitches
         self.late = 0                  # the model's notes that came later than LATE_S, skipped
         self.bpm, self.metronome = 0, False   # the tempo the model keeps to and whether we click it
         self.click_at = None           # when the metronome's next beat falls
@@ -132,8 +135,9 @@ class Duo:
         kind, *values = line.split()
         with self.lock:
             if kind == 'note':
-                onset, duration, pitch, *how = values   # its hand, if the model says
-                self.pending.append((self.started + float(onset), float(duration), int(pitch), (how + ['right'])[0]))
+                onset, duration, pitch, *how = values   # its voice, if the model says
+                voice = how[0] if how and how[0] in sound.VOICES else 'solo'
+                self.pending.append((self.started + float(onset), float(duration), int(pitch), voice))
             elif kind == 'cut':
                 cut = self.started + float(values[0])
                 self.pending = [n for n in self.pending if n[0] < cut]
@@ -146,9 +150,9 @@ class Duo:
         with self.lock:
             if self.metronome and self.bpm:
                 self._click(now)
-            for pitch, (onset, offset, _) in list(self.sounding.items()):
+            for key, (onset, offset, _) in list(self.sounding.items()):
                 if offset <= now:
-                    self._release(pitch, now)
+                    self._release(key, now)
             due = [n for n in self.pending if n[0] <= now]
             self.pending = [n for n in self.pending if n[0] > now]
             accompanying = self.played_at is not None and now - self.played_at < 1.0
@@ -156,19 +160,20 @@ class Duo:
                 if now - onset > LATE_S:
                     self.late += 1
                     continue
-                if pitch in self.sounding:
-                    self._release(pitch, now)
+                channel = sound.VOICES[hand]
+                if (channel, pitch) in self.sounding:
+                    self._release((channel, pitch), now)
                 together = [n[2] for n in due if n[0] == onset and n[3] == hand]
                 velocity = dynamics(pitch, hand, together, self.line, self.level, accompanying, self.rng)
-                if hand == 'right':
+                if hand == 'solo':
                     self.line.append(pitch)
                 ring = max(duration * RING, duration + RING_S)
                 if hand == 'bass':   # a double bass: each note stops the one before, and no pedal
-                    if self.bass in self.sounding:
-                        self._release(self.bass, now)
+                    if (channel, self.bass) in self.sounding:
+                        self._release((channel, self.bass), now)
                     self.bass, ring = pitch, duration
-                self.midi_rec.play_midi_message([0x90, pitch, velocity], is_generated=True)
-                self.sounding[pitch] = (now, now + ring, velocity)
+                self.midi_rec.play_midi_message([0x90, pitch, velocity], is_generated=True, channel=channel)
+                self.sounding[(channel, pitch)] = (now, now + ring, velocity)
 
     def _click(self, now):
         """Clicks the beat that is due: the model's beats fall on k * 60 / bpm seconds after the connection opened."""
@@ -187,13 +192,14 @@ class Duo:
             self.pending = []
             for pitch in list(self.pedaled):
                 self._sounded(pitch, now)
-            for pitch in list(self.sounding):
-                self._release(pitch, now)
+            for key in list(self.sounding):
+                self._release(key, now)
 
-    def _release(self, pitch, now):
-        onset, _, velocity = self.sounding.pop(pitch)
-        self.midi_rec.play_midi_message([0x80, pitch, 0], is_generated=True)
-        self.notes.append((onset, now, pitch, velocity, True))
+    def _release(self, key, now):
+        channel, pitch = key
+        onset, _, velocity = self.sounding.pop(key)
+        self.midi_rec.play_midi_message([0x80, pitch, 0], is_generated=True, channel=channel)
+        self.notes.append((onset, now, pitch, velocity, channel))
 
     def save(self, path):
         if not self.notes:
@@ -201,12 +207,16 @@ class Duo:
         mid = mido.MidiFile()
         ticks = lambda seconds: int(mido.second2tick(seconds, mid.ticks_per_beat, mido.bpm2tempo(120)))
         origin = min(n[0] for n in self.notes)
-        for generated, channel, program in ((False, 0, INPUT_PROGRAM), (True, 1, GENERATED_PROGRAM)):
+        played_with = sound.load()   # a track for you and one for each of its voices, on the instrument it sounded as
+        for channel in sound.PLAYERS:
+            generated, program = channel != sound.YOU, played_with[channel]['instrument']
             messages = []
-            for onset, offset, pitch, velocity, is_generated in self.notes:
-                if is_generated == generated:
+            for onset, offset, pitch, velocity, voice in self.notes:
+                if (voice or sound.YOU) == channel:
                     messages.append((onset - origin, 'note_on', pitch, velocity))
                     messages.append((offset - origin, 'note_off', pitch, 0))
+            if not messages and channel not in (sound.YOU, sound.AI):
+                continue
             track = mido.MidiTrack([mido.Message('program_change', channel=channel, program=program)])
             track += [mido.Message('control_change', channel=channel, control=c, value=v)
                       for c, v in (GENERATED_CONTROLS if generated else INPUT_CONTROLS)]
@@ -224,7 +234,7 @@ class Duo:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         mid.save(path)
         # the sound it was played with, as the piano roll's knobs left it: python sound.py bake renders the duo with it
-        sound.save(sound.load(), os.path.splitext(path)[0] + '.sound.json')
+        sound.save(played_with, os.path.splitext(path)[0] + '.sound.json')
         print(f"Duet saved as {path}")
 
 
@@ -251,6 +261,8 @@ if __name__ == "__main__":
     for channel, controls in ((midiRec.input_channel, INPUT_CONTROLS), (midiRec.generated_channel, GENERATED_CONTROLS)):
         for control, value in controls:
             midiRec.play_midi_message([0xB0 | channel, control, value])
+    for message in sound.setup(sound.load()):   # each voice on its instrument, even with no piano roll beside us
+        midiRec.play_midi_message(message)
     sock, started = connect(os.environ.get('AMT_SERVER', 'localhost:8765'))
     duo = Duo(lambda line: sock.sendall(line.encode()), midiRec, started)
 
@@ -313,7 +325,7 @@ if __name__ == "__main__":
         codeK.end()
         duo.stop(time.monotonic())
         sock.close()
-        print(f"The model played {sum(n[4] for n in duo.notes)} notes; {duo.late} came later than {LATE_S} s and "
+        print(f"The model played {sum(bool(n[4]) for n in duo.notes)} notes; {duo.late} came later than {LATE_S} s and "
               f"were skipped")
         duo.save(f"generated/{int(time.time())}.mid")
         print("Recording Stopped")

@@ -67,7 +67,18 @@ class DuoTest(unittest.TestCase):
         played = [(m[0] & 0xF0, m[1]) for m, generated in self.out.messages if generated]
         self.assertEqual(played, [(0x90, 41), (0x80, 41), (0x90, 43)])
         self.duo.tick(102.5 + 0.4)   # as long as it was written: no pedal
-        self.assertIn(([0x80, 43, 0], True), self.out.messages)
+        self.assertIn(([0x80, 43, 0], main.sound.BASS), self.out.messages)   # on its bass's own channel
+
+    def test_each_voice_of_the_model_plays_on_its_own_channel(self):
+        for voice in ('solo', 'chords', 'bass'):
+            self.duo.receive(f"note 1.000 0.500 60 {voice}\n")
+        self.duo.receive("note 1.000 0.500 72\n")             # an older server names no voice: its solo
+        self.duo.tick(101.0)
+        on = sorted((m[1], channel) for m, channel in self.out.messages if m[0] == 0x90)
+        self.assertEqual(on, [(60, main.sound.AI), (60, main.sound.CHORDS), (60, main.sound.BASS), (72, main.sound.AI)])
+        self.duo.stop(102.0)                                  # the same key on three instruments: each is let go
+        self.assertEqual(sorted(n[4] for n in self.duo.notes), [main.sound.AI, main.sound.AI, main.sound.CHORDS,
+                                                                main.sound.BASS])
 
     def test_a_cut_drops_the_notes_that_have_not_sounded(self):
         for line in ("note 2.000 0.200 60\n", "note 2.500 0.200 62\n", "note 3.000 0.200 64\n"):
@@ -121,13 +132,13 @@ class DuoTest(unittest.TestCase):
         self.assertGreater(levels[1], levels[0] + 30)
 
     def test_it_does_not_follow_a_soft_keyboard_into_a_whisper(self):
-        soft = main.dynamics(60, 'right', [60], [], 30, False, random.Random(0))
-        self.assertEqual(soft, main.dynamics(60, 'right', [60], [], main.QUIETEST, False, random.Random(0)))
+        soft = main.dynamics(60, 'solo', [60], [], 30, False, random.Random(0))
+        self.assertEqual(soft, main.dynamics(60, 'solo', [60], [], main.QUIETEST, False, random.Random(0)))
 
     def test_its_line_swells_as_it_rises(self):
         line = [60, 62, 64, 65, 67, 69, 71, 72]
-        low = main.dynamics(60, 'right', [60], line, 80, False, random.Random(0))
-        high = main.dynamics(72, 'right', [72], line, 80, False, random.Random(0))
+        low = main.dynamics(60, 'solo', [60], line, 80, False, random.Random(0))
+        high = main.dynamics(72, 'solo', [72], line, 80, False, random.Random(0))
         self.assertGreater(high, low)
 
     def test_a_note_that_arrives_too_late_is_skipped(self):

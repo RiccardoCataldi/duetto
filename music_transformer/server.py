@@ -9,9 +9,10 @@ One line per message, times in seconds since the connection opened:
                                                          first key): its tune waits for Play
     client -> server   "on <onset> <duration> <pitch> <velocity>"   you pressed a key (the duration is a guess)
     client -> server   "off <onset> <pitch> <duration>"  the key you pressed at <onset> stopped sounding (pedal and all)
-    server -> client   "note <onset> <duration> <pitch> <hand>"   the model's next note, of its right hand or of
-                                                      its walking bass (bass: one note at a time, as long as
-                                                      written); how hard is left to the client
+    server -> client   "note <onset> <duration> <pitch> <voice>"  the model's next note, of its solo, its chords or
+                                                      its bass (bass: one note at a time, as long as written):
+                                                      each voice may sound as its own instrument; how hard is
+                                                      left to the client
     server -> client   "cut <onset>"                     forget the model's notes from <onset> on: they are resampled
     server -> client   "tempo <bpm> <metronome> <bar>"   the tempo it keeps to, a bar's first beat at <bar>
                                                          and a beat every 60 / bpm from it, and whether to click
@@ -95,10 +96,8 @@ def make_handler(player):
                     if kind == 'set' and len(values) == 2 and values[0] in KNOBS:
                         name = values[0]
                         knobs[name] = knob(name, float(values[1]))
-                        for session, inbox in playing:
-                            session.turn(**{name: knobs[name]})
-                            if name in ('bpm', 'metronome', 'chart', 'playing'):
-                                inbox.put(('tempo',))
+                        for _, inbox in playing:   # the duo turns it itself, between two notes: never while it
+                            inbox.put(('turn', name, knobs[name]))   # samples one
                         print(f"duo: {name} = {knobs[name]}")
             except (ConnectionResetError, ValueError) as e:
                 print(f"duo: bad knob ({e})")
@@ -141,6 +140,9 @@ def make_handler(player):
                             note = False
                         if note is None:
                             break
+                        if note and note[0] == 'turn':
+                            session.turn(**{note[1]: note[2]})
+                            note = ('tempo',) if note[1] in ('bpm', 'metronome', 'chart', 'playing') else False
                         if note and note[0] == 'tempo':
                             clicks = session.metronome and session.playing   # it clicks while the tune plays
                             self.wfile.write(f"tempo {session.pace} {int(clicks)} {session.began:.3f}\n".encode())

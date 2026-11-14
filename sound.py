@@ -1,5 +1,6 @@
 """
-The sound of the duo in FluidSynth, yours and the model's: instrument, volume, envelope (ADSR), reverb and a delay.
+The sound of the duo in FluidSynth, yours and the model's three voices (its solo, its chords, its bass: a band, each
+voice on an instrument of its own): instrument, volume, envelope (ADSR), reverb and a delay.
 The piano roll's knobs turn it while you play (see knobs.py) and it is kept in SOUND_FILE; main.py saves a copy
 next to each duo, and a saved duo is rendered with it:
 
@@ -18,13 +19,16 @@ from collections import Counter
 
 import mido
 
-YOU, AI = 0, 1                       # MIDI channels, as main.py plays them
-ECHO = {YOU: 2, AI: 3}               # the channel each one's echoes play on
+YOU, AI = 0, 1                       # MIDI channels, as main.py plays them: you, and the model's solo
+CHORDS, BASS = 4, 5                  # its chords and its bass
+PLAYERS = (YOU, AI, CHORDS, BASS)
+VOICES = {'solo': AI, 'chords': CHORDS, 'bass': BASS}   # the channel of each of the model's voices (server.py's)
+ECHO = {YOU: 2, AI: 3, CHORDS: 6, BASS: 7}   # the channel each one's echoes play on (9 is the metronome's)
 SOUND_FILE = os.path.expanduser('~/.config/ai-duet/sound.json')
 MAX_ECHOES = 12
 QUIETEST = 4                         # velocity under which an echo is not played
 
-# name: default for you, default for the model, lowest, highest, unit, what it does
+# name: default for you, default for the model's voices, lowest, highest, unit, what it does
 SOUND = {
     'instrument': (0, 0, 0, 127, 'program', "the General MIDI instrument"),
     'volume': (100, 100, 0, 127, 'level', "how loud it plays"),
@@ -38,6 +42,10 @@ SOUND = {
     'echo': (0.0, 0.0, 0.0, 1.0, 'level', "how loud the first echo is (0: no delay)"),
     'feedback': (0.4, 0.4, 0.0, 0.85, 'level', "how much each echo keeps of the one before"),
 }
+# where its chords and its bass differ from its solo: a piano a little behind it, a double bass in the middle
+THEIRS = {CHORDS: {'volume': 90, 'pan': 76}, BASS: {'instrument': 32, 'volume': 115, 'pan': 64, 'reverb': 30}}
+# bands: name, the instruments of its solo, its chords and its bass
+BANDS = [('piano trio', (0, 0, 32)), ('vibes', (11, 0, 32)), ('two pianos', (0, 0, 0))]
 ENVELOPE = {'attack': 34, 'decay': 36, 'sustain': 37, 'release': 38}   # SoundFont generators of the volume envelope
 NRPN_SCALE = {'attack': 2, 'decay': 2, 'sustain': 1, 'release': 2}     # FluidSynth multiplies NRPN data by these
 
@@ -61,7 +69,8 @@ GM = ["Acoustic Grand Piano", "Bright Acoustic Piano", "Electric Grand Piano", "
 
 
 def defaults():
-    return {player: {name: spec[player] for name, spec in SOUND.items()} for player in (YOU, AI)}
+    return {player: {**{name: spec[player != YOU] for name, spec in SOUND.items()}, **THEIRS.get(player, {})}
+            for player in PLAYERS}
 
 
 def load(path=SOUND_FILE):
@@ -70,7 +79,7 @@ def load(path=SOUND_FILE):
     try:
         with open(path) as f:
             saved = json.load(f)
-        for player in (YOU, AI):
+        for player in PLAYERS:
             sound[player].update({k: v for k, v in saved.get(str(player), {}).items() if k in SOUND})
     except (OSError, ValueError):
         pass

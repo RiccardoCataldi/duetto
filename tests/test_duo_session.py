@@ -11,7 +11,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from anticipation.config import CONTEXT_SIZE, MAX_PITCH
 from anticipation.vocab import DUR_OFFSET, NOTE_OFFSET, TIME_OFFSET, VOCAB_SIZE
-from music_transformer import duo
+from music_transformer import chart, duo
 from music_transformer.duo import DuoSession
 from music_transformer.listener import hands
 
@@ -101,14 +101,41 @@ class DuoSessionTest(unittest.TestCase):
         self.assertLessEqual(self.session._last_time(), self.session.now())   # what it had not sounded is gone
         self.assertEqual([n for n in self.fill() if n], [])   # nothing more once stopped
 
-    def test_trading_fours_you_solo_four_bars_then_it_does(self):
-        self.session.turn(chart=self.tune('blues_in_f'), playing=1, part=3)
-        bar = 4 * 60 / 110
-        self.assertEqual([self.session._solos(k * bar + 0.1, True) for k in (0, 3, 4, 7, 8, 12, 15, 16)],
-                         [False, False, True, True, False, True, True, False])   # on through the 12 bars' end
-        self.session.hear(0.0, 0.3, 53)
-        self.clock.t = 4.5 * bar
-        self.assertEqual(self.session.state()['doing'], 'its turn')
+    def test_after_stop_it_plays_again_whatever_was_turned_meanwhile(self):
+        self.session.turn(chart=self.tune('autumn_leaves'), part=0, playing=1)
+        self.session.begin()
+        self.assertGreater(len([n for n in self.fill() if n]), 0)
+        for turned in ({}, {'style': 1}, {'chart': self.tune('blues_in_f')}, {'style': 2, 'bpm': 200}):
+            self.session.turn(playing=0)     # Stop takes out what it had not sounded: the model's cache with it
+            for name, value in turned.items():
+                self.session.turn(**{name: value})
+            self.clock.t += 0.3
+            self.session.turn(playing=1)
+            self.clock.t += 0.2
+            self.assertGreater(len([n for n in self.fill() if n]), 0, turned)
+
+    def test_each_note_says_its_voice_solo_chords_or_bass(self):
+        self.session.turn(chart=self.tune('blues_in_f'), part=0, playing=1)   # it comps
+        self.session.begin()
+        def voices():
+            heard = set()
+            for _ in range(40):
+                self.clock.t += 0.1
+                heard |= {n[3] for n in self.fill()}
+            return heard
+        self.assertEqual(voices(), {'chords', 'bass'})
+        self.session.turn(part=2, licks=0)                                   # it solos, for you to comp
+        self.clock.t += 1
+        self.assertEqual(voices(), {'solo'})
+
+    def test_the_style_is_yours_to_choose_whatever_the_tune(self):
+        for tune in ('black_orpheus', 'blues_in_f'):
+            self.session.turn(chart=self.tune(tune), style=0)
+            self.assertEqual((chart.swung(self.session), self.session._bossa()), (True, False), tune)   # swing
+            self.session.turn(style=1)
+            self.assertEqual((chart.swung(self.session), self.session._bossa()), (False, True), tune)   # bossa
+            self.session.turn(style=2)
+            self.assertEqual((chart.swung(self.session), self.session._bossa()), (False, False), tune)  # even 8ths
 
     def test_over_a_tune_its_bass_walks_root_first_and_approaches_the_next_chord(self):
         self.session.turn(chart=self.tune('blues_in_f'), playing=1, part=0)   # F7 | Bb7: a beat is 0.545 s
@@ -155,12 +182,11 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual(bass, list(range(bass[0], bass[-1] + 1)))   # no beat without its bass note
         self.assertGreater(len(bass), 12)
         self.assertTrue(all(abs(n[0] * 2 - round(n[0] * 2)) < 0.07 for n in notes if n[3] == 'bass'))
-        self.assertGreater(sum(n[3] == 'right' for n in notes), 5)
+        self.assertGreater(sum(n[3] != 'bass' for n in notes), 5)
 
     def test_over_a_bossa_its_bass_plays_root_and_fifth_on_one_the_and_of_two_three_and_the_and_of_four(self):
-        from music_transformer.chart import CHARTS
-        self.assertEqual(CHARTS[self.tune('black_orpheus') - 1].bass, 'bossa')
-        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('black_orpheus'), playing=1, part=0)
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('black_orpheus'), playing=1, part=0,
+                             style=1)
         session.hear(0.0, 0.3, 60)                               # 120 bpm: a beat is 0.5 s
         notes = []
         for _ in range(80):
@@ -178,8 +204,19 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual((bass(0.02) % 12, bass(1.5) % 12, bass(2) % 12), (9, 4, 4))   # A, then its fifth E
         self.assertEqual(bass(3.5) % 12, 11)                     # B: the next bar's root, ahead of it
 
+    def test_its_walking_bass_holds_each_note_until_the_next(self):
+        self.session.turn(chart=self.tune('autumn_leaves'), playing=1, part=0)   # 120 bpm: a beat is 0.5 s
+        self.session.begin()
+        bass = []
+        for _ in range(80):
+            self.clock.t += 0.1
+            bass += [n for n in self.fill() if n[3] == 'bass']
+        self.assertGreater(len(bass), 10)
+        self.assertTrue(all(abs(a[1] - (b[0] - a[0])) < 0.03 for a, b in zip(bass, bass[1:])))
+
     def test_over_a_bossa_its_bass_is_mostly_legato_and_moves_now_and_then(self):
-        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('black_orpheus'), playing=1, part=0)
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('black_orpheus'), playing=1, part=0,
+                             style=1)
         session.hear(0.0, 0.3, 60)                               # 120 bpm: a beat is 0.5 s
         notes = []
         for _ in range(400):
@@ -220,7 +257,7 @@ class DuoSessionTest(unittest.TestCase):
                     session.hear(self.clock.t - start - 0.05, 0.3, 60 + step % 7)
                 while session.ahead() < duo.LOOKAHEAD:
                     notes.append(session.play())
-            right = sorted(n[0] for n in notes if n and n[3] == 'right' and n[0] > 3)
+            right = sorted(n[0] for n in notes if n and n[3] != 'bass' and n[0] > 3)
             self.assertGreater(len(right), 8, part)
             self.assertLess(max(b - a for a, b in zip(right, right[1:])), 3.5, part)   # a second, a breath, a bar: it
                                                                                       # takes the last moment it may
@@ -243,12 +280,12 @@ class DuoSessionTest(unittest.TestCase):
             beat = 60 / session.pace
             first = session.began + 8 * beat                 # your note is long past: it no longer comps under you
             notes = [note for note in notes if note and first <= note[0] < 30]
-            under = [n for n in notes if n[3] == 'right' and sum(m[0] == n[0] and m[3] == 'right' and
+            under = [n for n in notes if n[3] != 'bass' and sum(m[0] == n[0] and m[3] != 'bass' and
                                                                  duo.UNDER[0] <= m[2] <= duo.UNDER[1] for m in notes) >= 3
                      and duo.UNDER[0] <= n[2] <= duo.UNDER[1]]
             chords = sorted({n[0] for n in under})
             if knobs['part'] != 1:                           # it comps, or solos for you to comp: none of these
-                self.assertEqual([n for n in notes if n[2] < 60 and n[3] == 'right' and knobs['part'] == 2], [])
+                self.assertEqual([n for n in notes if n[2] < 60 and n[3] != 'bass' and knobs['part'] == 2], [])
                 self.assertEqual(len(session._my_line(session.comp)), 0)
                 continue
             bars = (30 - first) / (4 * beat)
@@ -258,7 +295,7 @@ class DuoSessionTest(unittest.TestCase):
                 self.assertTrue(any(abs(spot - 0.02 - at) < 0.2 for at in chart.stabs(session, int(bar))), (onset, spot))
                 self.assertIn(len({n[2] for n in under if n[0] == onset}), (3, 4))   # and a note of its line, at times
                 self.assertGreaterEqual(sum(n[1] <= 1.5 * beat + 0.01 for n in under if n[0] == onset), 3)
-            line = [n for n in notes if n[3] == 'right' and n not in under]
+            line = [n for n in notes if n[3] != 'bass' and n not in under]
             self.assertGreater(len(line), 2 * len(chords))   # its line goes on over them, and its bass under
             self.assertGreater(sum(n[3] == 'bass' for n in notes), 0.8 * 4 * bars)
 
@@ -291,7 +328,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertEqual(bass, list(range(bass[0], bass[-1] + 1)))   # no beat without its bass note
         self.assertGreater(len(bass), 12)
         self.assertTrue(all(n[2] < 52 for n in notes if n and n[3] == 'bass'))
-        self.assertTrue(all(n[2] >= 72 for n in notes if n and n[3] == 'right'))
+        self.assertTrue(all(n[2] >= 72 for n in notes if n and n[3] != 'bass'))
 
     def test_over_a_tune_it_comps_more_than_four_chords_before_a_breath(self):
         class Eager(UniformModel):   # every note as soon as it may: its chords full
@@ -307,7 +344,7 @@ class DuoSessionTest(unittest.TestCase):
             self.clock.t += 0.1
             while session.ahead() < duo.LOOKAHEAD:
                 notes.append(session.play())
-        onsets = sorted(n[0] for n in notes if n and n[3] == 'right')
+        onsets = sorted(n[0] for n in notes if n and n[3] != 'bass')
         breath = next(b for a, b in zip(onsets, onsets[1:]) if b - a > 1.4)   # a breath is 1.5 s
         self.assertGreater(sum(onsets.count(onset) == 4 for onset in set(onsets) if onset < breath), 4)
 
@@ -422,7 +459,7 @@ class DuoSessionTest(unittest.TestCase):
         upbeat = [(-1, 0.5, 70), (-0.5, 0.5, 71), (0, 0.5, 72), (1, 0.5, 75), (2, 0.5, 79)]
         with unittest.mock.patch('music_transformer.licks.quote', lambda *_: ('someone · a tune', upbeat, 1)):
             session, notes = self.solo(6.5, licks=1, pickup=0, vary=0, out_of_key=0)   # a bar is 2 s, a beat 0.5 s
-        played = [(round(onset, 2), pitch) for onset, _, pitch, hand in notes if hand == 'right']
+        played = [(round(onset, 2), pitch) for onset, _, pitch, hand in notes if hand != 'bass']
         for bar in (2.0, 4.0):   # on the fourth beat of the bar before and its "and", swung, then on one
             self.assertTrue({(bar - 0.5, 70), (round(bar - 0.5 / 3, 2), 71), (bar, 72)} <= set(played), played)
         with unittest.mock.patch('music_transformer.licks.quote', lambda *_: ('someone · a tune', upbeat, 1)):
@@ -458,7 +495,7 @@ class DuoSessionTest(unittest.TestCase):
         with quoting():
             session, notes = self.solo(2.5, licks=1, pickup=1, vary=0)   # a bar is 2 s, a beat 0.5 s
         # over Cm7, after the A on three: Bb on four, B on its "and", swung, and the C on one
-        way = [(onset, pitch) for onset, _, pitch, hand in notes if hand == 'right' and pitch >= 70 and 1.2 < onset < 1.95]
+        way = [(onset, pitch) for onset, _, pitch, hand in notes if hand != 'bass' and pitch >= 70 and 1.2 < onset < 1.95]
         self.assertEqual([pitch for _, pitch in way], [70, 71], way)
         self.assertTrue(abs(way[0][0] - 1.5) < 0.03 and abs(way[1][0] - 1.5 - 0.5 * 2 / 3) < 0.03, way)
         self.assertTrue(any(abs(onset - 2.0) < 0.03 and pitch == 72 for onset, _, pitch, _ in notes))
@@ -625,7 +662,7 @@ class DuoSessionTest(unittest.TestCase):
         self.assertLessEqual(max(b - a for a, b in zip([3.0] + onsets, onsets)), duo.MAX_REST / 100 + 1e-9)
         instruments = {(n - NOTE_OFFSET) // MAX_PITCH for n in self.session.seq[3::3][1:]}
         self.assertLessEqual(instruments, {self.session.me, self.session.left})
-        self.assertLessEqual({hand for *_, hand in notes}, {'bass', 'right'})
+        self.assertLessEqual({hand for *_, hand in notes}, {'bass', 'chords', 'solo'})
 
     def test_your_note_drops_only_what_the_model_has_not_played_yet(self):
         self.session.turn(commit=duo.MARGIN)
@@ -796,7 +833,7 @@ class DuoSessionTest(unittest.TestCase):
         session = DuoSession(StuckModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1)
         session.hear(0.0, 0.3, 60)
         notes = [session.play() for _ in range(40)]
-        for hand, most, step in (('right', duo.CHORD, duo.MIN_STEP), ('bass', 1, 40)):   # its chords, its walking bass
+        for hand, most, step in (('chords', duo.CHORD, duo.MIN_STEP), ('bass', 1, 40)):   # its chords, its walking bass
             onsets = {}
             for onset, _, pitch, played in notes:
                 if played == hand:
@@ -824,13 +861,13 @@ class DuoSessionTest(unittest.TestCase):
             session.play()
         session.turn(min_step=50, top_p=2.0)
         self.assertEqual(session.knobs()['top_p'], 1.0)   # kept within its range
-        times = sorted({onset for onset, *_, hand in (session.play() for _ in range(20)) if hand == 'right'})
+        times = sorted({onset for onset, *_, hand in (session.play() for _ in range(20)) if hand != 'bass'})
         self.assertGreaterEqual(min(b - a for a, b in zip(times, times[1:])), 0.5 - 1e-9)
 
     def test_it_plays_only_in_the_octaves_it_is_given_even_turned_the_wrong_way_round(self):
         self.session.turn(lowest=5, highest=4)
         self.session.hear(0.0, 0.3, 30)
-        pitches = [pitch for _, _, pitch, hand in (self.session.play() for _ in range(60)) if hand == 'right']
+        pitches = [pitch for _, _, pitch, hand in (self.session.play() for _ in range(60)) if hand != 'bass']
         self.assertTrue(pitches and all(60 <= p <= 83 for p in pitches), pitches)   # its bass keeps its own register
         self.assertEqual(self.session.octaves(), (60, 83))
 

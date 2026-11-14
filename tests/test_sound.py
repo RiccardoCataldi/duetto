@@ -57,7 +57,8 @@ class SoundTest(unittest.TestCase):
             sound.bake(os.path.join(tmp, 'duo.mid'), os.path.join(tmp, 'baked.mid'), values)
             baked = [m for m in mido.MidiFile(os.path.join(tmp, 'baked.mid')) if not m.is_meta]
         programs = {(m.channel, m.program) for m in baked if m.type == 'program_change'}
-        self.assertEqual(programs, {(0, 0), (2, 0), (1, 48), (3, 48)})
+        self.assertEqual(programs, {(0, 0), (2, 0), (1, 48), (3, 48), (4, 0), (6, 0), (5, 32), (7, 32)})   # you; its
+        # solo, its chords and its bass, each with its echoes' channel
         notes = [(m.channel, m.note, m.velocity) for m in baked if m.type == 'note_on' and m.velocity]
         self.assertEqual(sorted(notes), [(0, 60, 100), (1, 67, 100), (3, 67, 50)])
 
