@@ -55,6 +55,7 @@ class Clock:
 class DuoSessionTest(unittest.TestCase):
     def setUp(self):
         torch.manual_seed(0)
+        random.seed(0)
         self.clock, self.model = Clock(), UniformModel()
         self.enterContext(unittest.mock.patch('music_transformer.chart.COUNT', 0))   # charts begin at once here
         self.session = DuoSession(self.model, 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1)
@@ -181,7 +182,7 @@ class DuoSessionTest(unittest.TestCase):
         session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('black_orpheus'), playing=1, part=0)
         session.hear(0.0, 0.3, 60)                               # 120 bpm: a beat is 0.5 s
         notes = []
-        for _ in range(160):
+        for _ in range(400):
             self.clock.t += 0.1
             while session.ahead() < duo.LOOKAHEAD:
                 notes.append(session.play())
@@ -326,7 +327,7 @@ class DuoSessionTest(unittest.TestCase):
         outside = {}
         for out_of_key in (0.0, 5.0):                # harmony fully outside, fully inside
             with unittest.mock.patch('music_transformer.chart.way', return_value='scale'):
-                session, notes = self.solo(16, licks=0, arc=0, out_of_key=out_of_key)
+                session, notes = self.solo(40, licks=0, arc=0, out_of_key=out_of_key)
             outside[out_of_key] = sum(not session.listener.chord_scale(n[0])[n[2] % 12] for n in notes)
             session.out_of_key, at = out_of_key, [k * 2 * 4 * 60 / session.pace for k in range(2000)]
             outside[out_of_key, 'ways'] = sum(chart.way(session, seconds) in ('bebop', 'blues') for seconds in at)
