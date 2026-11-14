@@ -1,6 +1,6 @@
 """
-The phrases the duo quotes over a tune: one to four bars of the great soloists as they played them, filed under the
-chords they were played over and kept free of any key (licks.json.gz, made by make_licks.py from the Weimar Jazz
+The phrases the duo quotes over a tune: phrases of the great soloists as they played them, one to four bars from
+where they began one to where they ended one, filed under the chords they were played over and kept free of any key (licks.json.gz, made by make_licks.py from the Weimar Jazz
 Database, under the ODbL). The duo keeps yours in a library of the same form, and quotes them the same way.
 """
 import functools
@@ -11,7 +11,7 @@ import os
 import numpy as np
 
 from music_transformer.bebop import MOVES, kind_of
-from music_transformer.make_licks import LONGEST, key_of
+from music_transformer.make_licks import LONGEST, UPBEAT, key_of
 
 with gzip.open(os.path.join(os.path.dirname(__file__), 'licks.json.gz'), 'rt') as f:
     DATA = json.load(f)

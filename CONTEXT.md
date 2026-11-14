@@ -38,9 +38,14 @@ _Avoid_: setting, param
 ### What it plays
 
 **Lick**:
-A phrase of one to four bars filed under the chords it was played over, free of any key: a great soloist's (from the
-Weimar Jazz Database) or **yours**, from what you played over a Tune.
+A phrase of one to four bars, from where its player began it to where they ended it, filed under the chords it was
+played over, free of any key: a great soloist's (from the Weimar Jazz Database) or **yours**, from what you played
+over a Tune.
 _Avoid_: quote (that is the act of playing a Lick)
+
+**Upbeat**:
+The notes of a Lick its soloist played before its first bar line, in the last two beats of the bar before.
+_Avoid_: pickup (that is what the duo adds between two Licks), anacrusis
 
 **Pickup**:
 The one to three notes that lead from one Lick into the next when there is room between them: a walk up or down the

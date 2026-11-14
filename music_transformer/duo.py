@@ -531,10 +531,12 @@ class DuoSession:
         While it comps (`solos` False) it quotes you only, where its line would be. It plays it as it was played,
         in the key of the tune, swung as the tune is, its notes on the beat within the scale of these chords unless
         its harmony is outside (licks.fit); what you make it sample again it plays again.
-        Once a phrase that ends in this bar is over it looks to the next bar: when another begins there, as often
-        as `pickup` says it leads into it (_pickup), and those notes come first."""
+        Once a phrase that ends in this bar is over, or from the bar's last UPBEAT beats when it quotes none here,
+        it looks to the next bar: when another begins there its line waits for it, as a soloist breathes before a
+        phrase. Its upbeat comes first, the notes its soloist played before the bar line, and as often as `pickup`
+        says it leads into it (_pickup)."""
         beat, at = 60 / self.pace, self._seconds(earliest)
-        bar = here = int((chart.beats(self, at) + 0.5) // chart.BEATS)
+        bar = int((chart.beats(self, at) + 0.5) // chart.BEATS)
         line = self._my_line()
         played = line[-1][0] if line else -1
 
@@ -544,8 +546,9 @@ class DuoSession:
                     ((self._tick(seconds), pitch, lasts) for seconds, pitch, lasts in self.quotes[bar])
                     if played < tick < MAX_TIME and tick >= earliest - LATE]
 
-        if self.pickup and solos and self.quotes.get(bar) and self.quotes.get(bar + 1) is not self.quotes[bar] \
-                and not coming(bar) and self._solos(self.began + ((bar + 1) * chart.BEATS + 0.01) * beat, False):
+        if solos and bar in self.quotes and self.quotes.get(bar + 1) is not self.quotes[bar] and not coming(bar) \
+                and (self.quotes[bar] or chart.beats(self, at) % chart.BEATS >= chart.BEATS - licks.UPBEAT) \
+                and self._solos(self.began + ((bar + 1) * chart.BEATS + 0.01) * beat, False):
             bar += 1   # (trading fours, the next bar may be yours: then it leads nowhere)
         if bar not in self.quotes:
             self._learn()
@@ -592,8 +595,6 @@ class DuoSession:
         if not solos and (not self.quoting or self.quoting[0] != 'you'):
             return None   # a soloist's phrase waits for its solo, as it did
         notes = coming(bar)
-        if bar != here:   # its way into the next phrase only: the phrase itself waits for its bar
-            notes = [note for note in notes if note[0] < self._tick(self.began + bar * chart.BEATS * beat)]
         return notes[0] if notes else None
 
     def _pickup(self, last, at, target):

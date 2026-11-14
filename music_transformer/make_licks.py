@@ -4,10 +4,12 @@ transcribed solos (wjazzd.db, from https://jazzomat.hfm-weimar.de, under the ODb
 
     python -m music_transformer.make_licks wjazzd.db
 
-A lick is one to four bars of a solo in 4/4 as they were played, kept with the chords under them: each note is
-(beats from the bar line, beats it lasts, semitones above the pitch class of the first chord's root), so that it is
-played in any key. Licks are filed under their chords: each one's kind (bebop.DEGREES'), its root in semitones above
-the first one's, and the beats it lasts.
+A lick is a phrase of a solo in 4/4 as it was played, or several in a row, over one to four bars: it begins where
+its soloist began a phrase and ends where they ended one (the database's phrases), kept with the chords of its bars.
+Each note is (beats from the first bar line, beats it lasts, semitones above the pitch class of the first chord's
+root), so that it is played in any key; a phrase that begins in the last UPBEAT beats of a bar and goes on is the
+next bar's, and those notes are its upbeat, before the bar line. Licks are filed under their chords: each one's kind
+(bebop.DEGREES'), its root in semitones above the first one's, and the beats it lasts.
 """
 import collections
 import gzip
@@ -19,12 +21,14 @@ import sqlite3
 import sys
 
 ROOTS = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
+BEATS = 4
 STYLES = ('TRADITIONAL', 'SWING', 'BEBOP', 'COOL', 'HARDBOP', 'POSTBOP', 'FUSION')
 MOST = 600       # licks kept under the same chords, drawn by lot: nearly all of them
 LEAST = 2        # chords with fewer licks than this are left out
 SPAN = 19        # a lick of one or two bars wider than this many semitones is left out
 WIDE = 24        # and one of three or four bars wider than this
 LONGEST = 4      # bars of the longest licks
+UPBEAT = 2       # beats before a bar line from which a phrase that goes on past it is an upbeat to the next bar
 
 
 def chord(name):
@@ -58,24 +62,28 @@ def licks(db):
             last = chord(name) or last
             if last:
                 chords[(bar, beat)] = last
-        bars = collections.defaultdict(list)
-        for bar, beat, tatum, division, pitch, duration, beatdur in db.execute(
-                "select bar, beat, tatum, division, pitch, duration, beatdur from melody where melid = ? order by onset",
-                (melid,)):
-            if beatdur:
-                bars[bar].append((beat - 1 + (tatum - 1) / max(division, 1), min(max(duration / beatdur, 0.1), 2), round(pitch)))
-        for first in bars:
-            for length in range(1, LONGEST + 1):
-                under = [chords.get((first + b, beat)) for b in range(length) for beat in range(1, 5)]
-                notes = [(round((b * 4 + at) * 12) / 12, lasts, pitch) for b in range(length) for at, lasts, pitch in bars.get(first + b, [])]
-                pitches = [pitch for *_, pitch in notes]
-                later = [len(bars.get(first + b, [])) for b in range(1, length)]   # no bar of it is silent
-                if None in under or len(notes) < 3 * length + 1 or max(pitches) - min(pitches) > (SPAN, WIDE)[length > 2] \
-                        or (length > 1 and (min(later[:-1], default=2) < 2 or later[-1] < 4 - length or later[-1] < 1
-                                            or len(set(under)) == 1 and first % length)):
+        notes = [(bar, beat - 1 + (tatum - 1) / max(division, 1), min(max(duration / beatdur, 0.1), 2), round(pitch))
+                 for bar, beat, tatum, division, pitch, duration, beatdur in db.execute(
+                     "select bar, beat, tatum, division, pitch, duration, beatdur from melody where melid = ? "
+                     "order by onset", (melid,))]
+        phrases = db.execute("select start, end from sections where melid = ? and type = 'PHRASE' order by start",
+                             (melid,)).fetchall()   # each one's first note and its last, counted through the solo
+        for k, (begins, end) in enumerate(phrases):
+            first = notes[begins][0] + (notes[begins][1] >= BEATS - UPBEAT and notes[end][0] > notes[begins][0])
+            for _, end in phrases[k:]:   # as far as the end of this phrase, or of one after it
+                length = notes[end][0] - first + 1
+                if length > LONGEST:
+                    break
+                under = [chords.get((first + b, beat)) for b in range(length) for beat in range(1, BEATS + 1)]
+                lick = [(round(((bar - first) * BEATS + at) * 12) / 12, lasts, pitch)
+                        for bar, at, lasts, pitch in notes[begins:end + 1]]
+                pitches = [pitch for *_, pitch in lick]
+                inner = [sum(first + b == bar for bar, *_ in notes[begins:end + 1]) for b in range(1, length - 1)]
+                if None in under or len(lick) < 3 * length + 1 or max(pitches) - min(pitches) > (SPAN, WIDE)[length > 2] \
+                        or min(inner, default=2) < 2:   # no bar of it is silent
                     continue
                 low = min(pitches) - (min(pitches) - under[0][0]) % 12   # the root's pitch at or under its lowest note
-                yield key_of(under), (performer, title), [[round(at, 3), round(lasts, 2), pitch - low] for at, lasts, pitch in notes]
+                yield key_of(under), (performer, title), [[round(at, 3), round(lasts, 2), pitch - low] for at, lasts, pitch in lick]
 
 
 if __name__ == '__main__':

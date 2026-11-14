@@ -396,20 +396,40 @@ class DuoSessionTest(unittest.TestCase):
         self.assertGreaterEqual(len(fits), 1)            # on F: a V-I of some soloist
         self.assertGreater(len(f7), 0)
 
-    def test_it_quotes_one_soloist_whole_over_a_progression_of_as_many_as_four_bars(self):
+    def test_it_quotes_one_soloists_phrase_whole_over_a_progression_of_several_bars(self):
         from music_transformer import licks
         with unittest.mock.patch('music_transformer.licks.LONGER', 1):
-            session, notes = self.solo(9, licks=1, out_of_key=0)   # Cm7 | F7 | Bbmaj7 | Ebmaj7: 8 s, as they were played
-        whole = [[pitch % 12 for *_, pitch in lick] for _, lick in licks.DATA['licks']['min.0.4 dom.5.4 maj.10.4 maj.3.4']]
-        self.assertIn([pitch % 12 for _, pitch, _ in session.quotes[0]], whole)   # its ii-V-I-IV, one soloist's four bars
-        self.assertTrue(all(session.quotes[bar] is session.quotes[0] for bar in range(4)))
-        self.assertGreater(sum(4.0 <= onset < 8.0 for onset, *_ in notes), 2)   # and it plays them through
+            session, notes = self.solo(6.5, licks=1, out_of_key=0)   # Cm7 | F7 | Bbmaj7: 6 s, as they were played
+        whole = [[pitch % 12 for *_, pitch in lick] for _, lick in licks.DATA['licks']['min.0.4 dom.5.4 maj.10.4']]
+        self.assertIn([pitch % 12 for _, pitch, _ in session.quotes[0]], whole)   # its ii-V-I, one soloist's three bars
+        self.assertTrue(all(session.quotes[bar] is session.quotes[0] for bar in range(3)))
+        self.assertGreater(sum(2.0 <= onset < 6.0 for onset, *_ in notes), 2)   # and it plays them through
         # a soloist it has just quoted is quoted again over the next chords, when they played them
-        with unittest.mock.patch('music_transformer.licks.SAME', 1):
-            name = licks.quote(licks.DATA, random.Random(1), [(9, 'm7b5')] * 4 + [(2, '7')] * 4, 60, 96, 72, 'John Coltrane')[0]
-        self.assertEqual(name.split(' · ')[0], 'John Coltrane')
+        who = licks.DATA['players'][licks.DATA['licks']['hdim.0.4 dom.5.4'][0][0]][0]
+        with unittest.mock.patch('music_transformer.licks.SAME', 1), unittest.mock.patch('music_transformer.licks.LONGER', 1):
+            name = licks.quote(licks.DATA, random.Random(1), [(9, 'm7b5')] * 4 + [(2, '7')] * 4, 60, 96, 72, who)[0]
+        self.assertEqual(name.split(' · ')[0], who)
         with unittest.mock.patch('music_transformer.licks.LONGER', 1):
             self.assertEqual(licks.quote(licks.DATA, random.Random(1), [(0, 'm7')] * 4 + [(5, '7')] * 4 + [(10, 'maj7')] * 4, 60, 96, 72)[2], 3)
+
+    def test_a_phrase_it_quotes_begins_and_ends_where_its_soloist_did_its_upbeat_before_the_bar_line(self):
+        from music_transformer import licks
+        every = [lick for found in licks.DATA['licks'].values() for _, lick in found]
+        upbeats = [lick for lick in every if lick[0][0] < 0]
+        self.assertGreater(len(upbeats), len(every) / 3)     # as bebop phrases do, many begin before the bar line
+        self.assertTrue(all(lick[0][0] >= -licks.UPBEAT for lick in upbeats))   # in the last two beats of the bar
+        upbeat = [(-1, 0.5, 70), (-0.5, 0.5, 71), (0, 0.5, 72), (1, 0.5, 75), (2, 0.5, 79)]
+        with unittest.mock.patch('music_transformer.licks.quote', lambda *_: ('someone · a tune', upbeat, 1)):
+            session, notes = self.solo(6.5, licks=1, pickup=0, vary=0, out_of_key=0)   # a bar is 2 s, a beat 0.5 s
+        played = [(round(onset, 2), pitch) for onset, _, pitch, hand in notes if hand == 'right']
+        for bar in (2.0, 4.0):   # on the fourth beat of the bar before and its "and", swung, then on one
+            self.assertTrue({(bar - 0.5, 70), (round(bar - 0.5 / 3, 2), 71), (bar, 72)} <= set(played), played)
+        with unittest.mock.patch('music_transformer.licks.quote', lambda *_: ('someone · a tune', upbeat, 1)):
+            session, _ = self.solo(0.5, licks=1, pickup=0, vary=0, out_of_key=0)
+            session.quotes = {3: []}                         # its fourth bar is its own lines
+            at = lambda beats: session._tick(session.began + 6.0 + beats * 0.5)
+            self.assertEqual(session._lick(at(1)), None)     # on its second beat: nothing to quote yet
+            self.assertEqual(session._lick(at(2.2))[:2], (at(3), 70))   # from its third it looks to the next bar's upbeat
 
     def test_a_pickup_leads_into_the_next_phrase_by_step_with_a_chromatic_approach_or_encloses_it(self):
         from music_transformer import licks
@@ -499,7 +519,7 @@ class DuoSessionTest(unittest.TestCase):
             shares[vary] = 1 - len(asked) / 200
             self.assertTrue(all(len(session.quotes[bar]) >= 3 for bar in range(196, 200)))
         self.assertEqual((shares[0], shares[1]), (0, 1 - 1 / 200))     # none; all but the first
-        self.assertTrue(0.4 < shares[0.5] < 0.6, shares)
+        self.assertTrue(0.35 < shares[0.5] < 0.65, shares)   # half of the times
 
     def test_it_develops_your_last_phrase_over_the_chords_that_follow_it(self):
         from music_transformer import licks
