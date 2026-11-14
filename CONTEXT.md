@@ -47,6 +47,16 @@ The one to three notes that lead from one Lick into the next when there is room 
 scale, a chromatic approach off the beat, or an enclosure of the next Lick's first note.
 _Avoid_: bridge (that is a Tune's B section), interpolation
 
+**Variation**:
+A Lick played again to develop it, right after it was quoted or after you played it, whatever the chords: as it was
+(a sequence), a beat later, its first half only, or upside down.
+_Avoid_: mutation, transformation
+
+**Arc**:
+How its solo builds over a chorus (three of a blues): from eighths, short phrases and the low of its register up to
+its height three quarters through, and down again.
+_Avoid_: curve, intensity
+
 **Recall**:
 How many of the Licks it quotes are yours, from what you played over the Tune, rather than the great soloists'.
 _Avoid_: memory (as a Knob name)

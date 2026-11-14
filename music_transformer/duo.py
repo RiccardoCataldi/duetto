@@ -77,6 +77,7 @@ WALK = 4.0        # logit added to the root where its walking bass begins a bar 
 BOSSA = (0, 1.5, 2, 3.5)   # beats of the bar its bass plays on over a bossa: 1, the and of 2, 3, the and of 4
 LEGATO = 0.75     # how often its bass over a bossa holds a note until the next; the others last half as long
 EARLY = 0.15      # beats before a bar line your phrase may begin and still begin at it: you rushed, it is no upbeat
+RISE = 12         # semitones its solo's register rises from where it begins to its height, at the top of its `arc`
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does
 KNOBS = {
@@ -115,6 +116,12 @@ KNOBS = {
               "each over the chords it was played over: 0: none, its own lines only; at the top: one after another"),
     'pickup': (0.5, 0.0, 1.0, '', "how often, when one phrase it quotes follows another and there is room between "
                "them, it leads into the next: by step, with a chromatic approach off the beat, or enclosing its first note"),
+    'vary': (0.3, 0.0, 1.0, '', "how often, in place of a new phrase, it plays the one it quoted last, or your last, "
+             "again over the chords that follow, as a soloist develops a phrase: as it was, a beat later, its first "
+             "half only, or upside down"),
+    'arc': (0.6, 0.0, 1.0, '', "how much its solo builds over a chorus (three of a blues): from eighths, short phrases "
+            "and the low of its register up to faster runs, longer and higher, three quarters through, and down "
+            "again; 0: the same all through"),
     'part': (1, 0, 3, 'choice:comps/duet/solos/trades', "it comps, with a walking bass, for you to solo; "
              "duet: it comps while you play and solos when you rest; it solos as a jazz player does, for you to comp; "
              "or you trade fours: four bars of your solo, then four of its own"),
@@ -148,6 +155,7 @@ class DuoSession:
                                        # duration), ...]: none when it plays its own
         self.quoting = None            # (whose it is, the seconds it ends at)
         self.quoted = [0, 0]           # the bars of its solo it has quoted, and all of them
+        self.motif = None              # the phrase it quoted last, or your last: (whose it is, the Lick, its bars)
         self.yours = {}                # your Licks, for this duo only: the phrases you played over each run of
                                        # chords (licks.key_of), as licks.DATA's, your last one last
         self.learned = -1.0            # session seconds of your last note in a phrase that has ended
@@ -286,7 +294,7 @@ class DuoSession:
             latest = min(latest, max(earliest, after + 2 * unit))
         # when each hand may play next: (instrument, its line, its register, its onsets as a mask over times)
         hands = []
-        for instrument, step, most, register in self._hands(you_play, solos):
+        for instrument, step, most, register in self._hands(you_play, solos, self._seconds(earliest)):
             if unit and instrument == self.me:
                 step = max(min(step, unit - self.grid), 5)   # its line may be as fast as that
             line, window = self._my_line(instrument), torch.full((MAX_TIME,), -float('inf'))
@@ -420,29 +428,36 @@ class DuoSession:
         start, gap = len(self.spoken) - 1, self.breath / TIME_RESOLUTION
         while start > 0 and self.spoken[start] - self.spoken[start - 1] < gap:
             start -= 1
-        notes = self.phrase * random.Random(self.spoken[start]).uniform(0.6, 1.4)
+        last = round(self.spoken[-1] * TIME_RESOLUTION) - self.base
+        solos = self._solos(self._seconds(last), self.now() - self.heard_at < PLAYING)
+        # as its solo builds its phrases are longer, and its breaths shorter
+        built = solos * self.arc * (chart.build(self, self.spoken[start]) - 0.5)
+        notes = self.phrase * (1 + built) * random.Random(self.spoken[start]).uniform(0.6, 1.4)
         if len(set(self.spoken[start:])) < notes:   # a chord it comps is one
             return 0
-        last = round(self.spoken[-1] * TIME_RESOLUTION) - self.base
-        if self._solos(self._seconds(last), self.now() - self.heard_at < PLAYING):
+        breath = round(self.breath * (1 - built))
+        if solos:
             bar, first = chart.BEATS * 60 / self.pace * TIME_RESOLUTION, self._tick(self.began)
             coming = round(first + max(math.ceil((last + 1 - first) / bar), 0) * bar)   # the next bar line
-            if self._lick(last + 1) or (coming < last + self.breath and self._lick(coming)):
+            if self._lick(last + 1) or (coming < last + breath and self._lick(coming)):
                 return 0
-        return last + self.breath
+        return last + breath
 
     def _walks(self):
         """Whether its left hand walks a bass under the tune: always, unless it solos for you to comp."""
         return self.part != 2
 
-    def _hands(self, you_play, solos=False):
+    def _hands(self, you_play, solos=False, at=None):
         """(instrument, step, most notes at once, (lowest, highest) pitch) of each hand it plays with, as its part
-        says: soloing (`solos`), a line of single notes from middle C up; comping, chords in the middle of the
-        keyboard; and under either, unless it solos for you to comp, a walking bass: a note a beat."""
+        says: soloing (`solos`), a line of single notes from middle C up, higher (RISE) as its solo builds to its
+        height at session seconds `at`, as much as its `arc` says; comping, chords in the middle of the keyboard;
+        and under either, unless it solos for you to comp, a walking bass: a note a beat."""
         low, high = self.octaves()
         within = lambda lowest, highest: (max(low, lowest), min(high, highest)) \
             if max(low, lowest) <= min(high, highest) else (low, high)
-        right = (self.me, self.min_step, 1, within(SOLO[0], SOLO[1])) if solos else \
+        rise, built = (0, 0) if at is None else (RISE * self.arc, chart.build(self, at))
+        right = (self.me, self.min_step, 1, within(SOLO[0] + round(rise * built), SOLO[1] - round(rise * (1 - built)))) \
+            if solos else \
             (self.me, self.min_step, max(self.chord, 3), within(COMP[0], COMP[1]))
         beat = 60 / self.pace * TIME_RESOLUTION * (0.5 if self._bossa() else 1)   # the least between its notes
         beat = max(round(beat) - self.grid - 1, 5)
@@ -510,9 +525,12 @@ class DuoSession:
         over the chords of the bars that begin there, as many as four and so long that the next begins where a
         progression does (licks.py), wherever in the tune they fall. As many of them as `recall` is of EXACT are
         yours (_learn), when you played over these chords: your last phrase there as often as `echo` is of its top,
-        or any of them; the others a great soloist's, by the one it last quoted when they played these chords too.
+        or any of them; the others a great soloist's, by the one it last quoted when they played these chords too,
+        and the one that goes on best from where its line left off (licks.place). As often as `vary` says, instead,
+        it plays again the phrase it quoted last, or your last, whatever the chords, to develop it (licks.vary).
         While it comps (`solos` False) it quotes you only, where its line would be. It plays it as it was played,
-        in the key of the tune, swung as the tune is; what you make it sample again it plays again.
+        in the key of the tune, swung as the tune is, its notes on the beat within the scale of these chords unless
+        its harmony is outside (licks.fit); what you make it sample again it plays again.
         Once a phrase that ends in this bar is over it looks to the next bar: when another begins there, as often
         as `pickup` says it leads into it (_pickup), and those notes come first."""
         beat, at = 60 / self.pace, self._seconds(earliest)
@@ -532,29 +550,39 @@ class DuoSession:
         if bar not in self.quotes:
             self._learn()
             start, rng = self.began + bar * chart.BEATS * beat, random.Random(self.varied * 7 + bar)
-            low, high = self._hands(False, True)[0][3]
-            near = (line[-1][1] - NOTE_OFFSET) % MAX_PITCH if line else (low + high) // 2
+            low, high = self._hands(False, True, start)[0][3]
+            before = self.quotes.get(bar - 1)   # the phrase that ends where this one begins
+            near = before[-1][1] if before else (line[-1][1] - NOTE_OFFSET) % MAX_PITCH if line else (low + high) // 2
+            chords = [chart.bar_at(self, start + (k + 0.01) * beat)[1][:2] for k in range(2 * licks.LONGEST * chart.BEATS)]
             ahead = 4 - bar % 4 if self.part == 3 else licks.LONGEST   # trading fours: no further than its four
             # by chance, but never far from its share of the bars so far
             owed = self.licks >= 1 or self.licks * (self.quoted[1] + 1) - self.quoted[0] > rng.uniform(-1.5, 1.5)
             quote = lambda library: licks.quote(
-                library, rng, [chart.bar_at(self, start + (k + 0.01) * beat)[1][:2] for k in range(2 * licks.LONGEST * chart.BEATS)],
-                low, high, near, self.quoting and self.quoting[0].split(' · ')[0], ahead)
+                library, rng, chords, low, high, near, self.quoting and self.quoting[0].split(' · ')[0], ahead)
             found = None
             if self.licks > 0 and owed:
-                if self.yours and rng.random() < self.recall / EXACT:
+                if solos and self.motif and self.motif[2] <= ahead and rng.random() < self.vary:
+                    placed = licks.place(licks.vary(*self.motif[1:], rng), chords[0][0], low, high, near)
+                    found = placed and (self.motif[0], placed[1], self.motif[2])
+                elif self.yours and rng.random() < self.recall / EXACT:
                     # echo is how closely its answer follows your phrase: here, how often it is that phrase itself
                     last = rng.random() < self.echo / KNOBS['echo'][2]
                     found = quote({'players': [['you']], 'licks': {
-                        chords: mine[-1:] if last else mine for chords, mine in self.yours.items()}})
-                found = found or solos and quote(licks.DATA)
+                        under: mine[-1:] if last else mine for under, mine in self.yours.items()}})
+                if not found and solos:
+                    found = quote(licks.DATA)
+                    if found:   # the phrase it may develop next, free of its key as a Lick is
+                        self.motif = (found[0], [[at_, lasts, pitch - chords[0][0]] for at_, lasts, pitch in found[1]],
+                                      found[2])
             phrase = []
             if found:
+                notes = found[1]
+                if 2 * self.out_of_key >= OUT_OF_KEY:   # inside: over these chords, not those it was played over
+                    notes = licks.fit(notes, lambda at_: self.listener.chord_scale(start + (at_ + 0.01) * beat))
                 swing = chart.CHARTS[self.chart - 1].swing   # an eighth off the beat falls on its last third
                 phrase = [(start + (at_ + (1 / 6 if swing and abs(at_ % 1 - 0.5) < 0.04 else 0)) * beat, pitch,
-                           max(round(lasts * beat * TIME_RESOLUTION), 1)) for at_, lasts, pitch in found[1]]
+                           max(round(lasts * beat * TIME_RESOLUTION), 1)) for at_, lasts, pitch in notes]
                 self.quoting = (found[0], phrase[-1][0])
-                before = self.quotes.get(bar - 1)   # the phrase that ends where this one begins
                 if before and solos and rng.random() < self.pickup:
                     phrase = self._pickup(before[-1], bar * chart.BEATS + found[1][0][0], phrase[0][1]) + phrase
             self.quotes = {b: notes for b, notes in self.quotes.items() if b >= bar - licks.LONGEST}
@@ -605,6 +633,8 @@ class DuoSession:
                 self.yours.setdefault(licks.key_of(under), []).append([0, [
                     [max(round((at_ - first) * 12) / 12, 0), min(max(lasts / beat, 0.1), 2), pitch - root]
                     for at_, (_, lasts, pitch) in zip(at, phrase)]])
+                if self.recall:   # and the phrase it may develop next
+                    self.motif = ('you', self.yours[licks.key_of(under)][-1][1], bars)
             self.learned, phrase = note[0], []
 
     def _bossa_bass(self, at, line):

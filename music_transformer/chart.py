@@ -7,6 +7,7 @@ more chords each, sharing the bar equally; `%` is the bar before again. Chords a
 iReal Pro (Cm7, C-7, F7b9, C7#5, Bbmaj7, B^7, Am7b5, Aø, Gm6, C7/E...) and heard as the nearest of listener.CHORDS.
 """
 import glob
+import math
 import os
 import random
 import re
@@ -95,13 +96,18 @@ def beats(session, seconds):
     return max(seconds - session.began, 0) * session.pace / 60
 
 
+HOLD = 0.5   # how often it keeps to its way for two bars more
+
+
 def way(session, seconds):
-    """How it solos at `seconds`, one of listener.palette()'s: another, by chance, every two bars. In a major key
-    the major pentatonic of the key is one more; the further its `out_of_key` is under its default (2), the more
-    often bebop and blues, the ways that leave the scale."""
+    """How it solos at `seconds`, one of listener.palette()'s: another, by chance, every two bars, or (HOLD) every
+    four. In a major key the major pentatonic of the key is one more; the further its `out_of_key` is under its
+    default (2), the more often bebop and blues, the ways that leave the scale."""
     ways = WAYS + (('major_pentatonic',) if (CHARTS[session.chart - 1].key or 0) < 12 else ()) \
         + ('bebop', 'blues') * round(max(2 - session.out_of_key, 0))
-    return random.Random(session.varied + beats(session, seconds) // PHRASE).choice(ways)
+    phrase = beats(session, seconds) // PHRASE
+    phrase -= phrase % 2 and random.Random(session.varied * 17 + phrase).random() < HOLD
+    return random.Random(session.varied + phrase).choice(ways)
 
 
 # the beats of a bar on which it comps a chord under its own solo, as often as each is here: on one, on the "and" of
@@ -116,13 +122,32 @@ def stabs(session, bar):
     return [spot + (1 / 6 if swing and spot % 1 else 0) for spot in random.Random(session.varied * 13 + 5 + bar).choice(STABS)]
 
 
+SPAN = 32     # bars its solo builds over, at least: as many whole choruses as make them
+PEAK = 0.75   # how far through them it is at its height
+
+
+def build(session, seconds):
+    """How far its solo has built at `seconds`, from 0 to 1: it rises from the top of a chorus (of every third, over
+    a blues: SPAN bars at least) to its height, PEAK of the way through, and comes down to the end."""
+    bars = len(CHARTS[session.chart - 1].bars)
+    bars *= -(-SPAN // bars)
+    through = beats(session, seconds) / BEATS % bars / bars
+    return min(through / PEAK, (1 - through) / (1 - PEAK))
+
+
 FEELS = (2, 2, 2, 3, 3, 4, 4, 8, 0)   # how it divides the beat, as often as each is here; 0: out of time
+BUSY = {2: 0, 3: 1, 4: 2, 8: 3}       # how busy each is; out of time is a step away, wherever its solo is
+BUSIEST = 2.5                         # as busy as its solo gets at its height: sixteenths, or thirty-seconds
 
 
 def feel(session, seconds):
     """How a soloist divides the beat at `seconds`: eighths (2), triplets (3), sixteenths (4), thirty-seconds (8),
-    or 0, free of the beat. Another, by chance, every two bars."""
-    return random.Random(session.varied * 31 + 1 + beats(session, seconds) // PHRASE).choice(FEELS)
+    or 0, free of the beat. Another, by chance, every two bars: the nearer what its solo has built to (build), the
+    more often, as much as its `arc` says."""
+    phrase = beats(session, seconds) // PHRASE
+    height = BUSIEST * build(session, session.began + phrase * PHRASE * 60 / session.pace)
+    return random.Random(session.varied * 31 + 1 + phrase).choices(
+        FEELS, [math.exp(-2 * session.arc * abs(BUSY.get(feel, height + 1) - height)) for feel in FEELS])[0]
 
 
 def follow(session, restart=True):

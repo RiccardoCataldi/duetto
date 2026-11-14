@@ -69,7 +69,7 @@ PARTS = [('comps', 0, "it comps, with a walking bass, for you to solo"),
          ('trade fours', 3, "four bars of your solo, then four of its own")]
 
 # the sections of Advanced, and of each piano's sound
-ADVANCED = [('Tune', ('chart', 'playing', 'part', 'licks', 'pickup', 'recall', 'bpm', 'metronome')),
+ADVANCED = [('Tune', ('chart', 'playing', 'part', 'licks', 'pickup', 'vary', 'recall', 'arc', 'bpm', 'metronome')),
             ('Timing', ('min_step', 'max_rest', 'run', 'answer', 'grid', 'phrase', 'breath', 'commit')),
             ('Harmony', ('out_of_key', 'chord_tone', 'tension', 'stay')),
             ('Texture', ('chord', 'no_repeat')),
