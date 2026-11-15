@@ -83,7 +83,8 @@ NARROW = ('arpeggio', 'extensions', 'pentatonic', 'blues', 'major_pentatonic', '
 PREFER = 1.5      # logit added to the notes of such a way
 PASSING_ON = 2.0  # logit taken, in a bebop scale, from its passing tone on the beat
 LATE = 6          # ticks: a note of a phrase it quotes may be this late and still be played
-FASTEST = 0.08    # seconds: a soloist's phrase with two notes closer than this at the tune's tempo is not quoted
+FASTEST = 0.11    # seconds: a soloist's phrase with two notes closer than this at the tune's tempo is not quoted,
+                  # and its own line divides the beat no finer: faster, a piano's notes blur into one another
 DETACHED = 0.8    # a note of a phrase it quotes lasts this much of the time to the next, at most: a horn's legato
                   # line, on a piano, would sound its notes one over the other
 WALK = 4.0        # logit added to the root where its walking bass begins a bar or a chord
@@ -126,7 +127,8 @@ KNOBS = {
              "(lower = sooner)"),
     'no_repeat': (NO_REPEAT, 2, 8, 'notes', "the length of runs it may not repeat"),
     'phrase': (PHRASE, 2, 64, 'notes', "about how many notes it plays before it takes a breath"),
-    'breath': (BREATH, 0, LONGEST_REST, 'ticks', "the silence that ends its phrase"),
+    'breath': (BREATH, 0, LONGEST_REST, 'ticks', "the silence that ends its phrase; between two phrases it quotes, "
+               "the silence it leaves before its own line leads into the next"),
     'recall': (4.0, 0.0, EXACT, '', "how many of the phrases it quotes are yours: 0, the great soloists' only; at the "
                "top, yours wherever you played over the chords"),
     'commit': (COMMIT, MARGIN, LOOKAHEAD, 'ticks', "how far ahead its plan stands when you play: low, it rethinks at every note"),
@@ -197,6 +199,7 @@ class DuoSession:
                                        # chords (licks.key_of), as licks.DATA's, your last one last
         self.learned = -1.0            # session seconds of your last note in a phrase that has ended
         self.voiced = None             # the voicing it comps with: ((root, kind, shell, register, two bars), pitches)
+        self.leads = None              # session seconds of the phrase its own line is leading into
         self.aim = None                # for a note of a phrase of its own: ((the pitch it goes to, notes until it),
                                        # whether the ear rests on it)
 
@@ -324,10 +327,15 @@ class DuoSession:
         # or thirty-seconds with no more than two of them of silence, or out of time
         solos = self._solos(self._seconds(earliest), you_play)
         feel = chart.feel(self, self._seconds(earliest)) if solos else None
+        while feel and feel > 2 and 60 / self.pace / feel < FASTEST:   # no finer than it can say clearly at this tempo
+            feel = {8: 4, 4: 3, 3: 2}[feel]
         unit = round(60 / self.pace / feel * TIME_RESOLUTION) if feel else None   # ticks
         # the next note of a phrase it quotes, as it was played: comping, one of yours only
         quote = self._lick(earliest, solos)
         self.aim = quote[3:] if quote and quote[1] is None else None   # a note of its own phrase: its pitch is free
+        lead = self._lead(quote, earliest) if quote and solos else None
+        if lead:   # its own line, on its way to the first note of the phrase to come, until an eighth before it
+            self.aim, quote = ((quote[1], max(round((lead[1] - earliest) / lead[2]), 1)), False), None
         if quote:
             feel = unit = None
         if feel and feel > 2:
@@ -349,6 +357,9 @@ class DuoSession:
                 chord = [note for time_, note in line if time_ == mine]
                 start = max(start, mine + (step if len(chord) >= most else 0))
                 end = min(max(end, mine + step), MAX_TIME - 1)
+            if lead and instrument == self.me:
+                end = min(end, lead[1])
+                start = min(max(start, lead[0]), end)
             window[start:end + 1] = 0
             if line:
                 window[mine + 1:mine + step] = -float('inf')
@@ -403,10 +414,12 @@ class DuoSession:
                 shortest, longest = (beat, 3 * beat) if chart.ballad(self) else (min(10, beat // 2), beat + beat // 2)
                 mask[DUR_OFFSET + min(shortest, MAX_DUR - 1):DUR_OFFSET + min(longest, MAX_DUR - 1) + 1] = 0
             elif slot == 1 and quote and self.seq[-1] - TIME_OFFSET == quote[0]:   # as long as it was played, or shorter
-                least = quote[2] if chart.ballad(self) else max(quote[2] // 2, 1)   # over a ballad: legato, as planned
+                # over a ballad legato, as planned; a short note, all of it
+                least = quote[2] if chart.ballad(self) or quote[2] <= self._shortest() else max(3 * quote[2] // 4, 1)
                 mask[DUR_OFFSET + min(least, MAX_DUR - 1):DUR_OFFSET + min(quote[2], MAX_DUR - 1) + 1] = 0
-            elif slot == 1:
-                mask[DUR_OFFSET:DUR_OFFSET + MAX_DUR] = 0
+            elif slot == 1:   # a note of its line sounds: no shorter than a detached eighth (its bass is tied anyway)
+                sings = solos and right is not None and bool(torch.isfinite(right[3][self.seq[-1] - TIME_OFFSET]))
+                mask[DUR_OFFSET + (self._shortest(unit) if sings else 0):DUR_OFFSET + MAX_DUR] = 0
             else:
                 tick = self.seq[-2] - TIME_OFFSET
                 # on the beat it owes, once its right hand has a note there (or may not play), the bass plays
@@ -433,6 +446,31 @@ class DuoSession:
         if self._instrument(self.seq[-1]) == self.left:
             self._tie()
         return self._played(solos or bool(quote))
+
+    def _lead(self, quote, earliest):
+        """When the next note it quotes, `quote`, is the first of a phrase and a silence longer than its `breath`
+        would come before it: (the tick its own line may go on from, the last it may play at, an eighth in ticks):
+        it leads into the phrase, as a soloist joins two ideas, rather than stop and start; once it has begun, with
+        no more breaths. None when the phrase is under way, there is no room for two eighths, over a ballad (its
+        silences are planned), or while it states the theme."""
+        if chart.ballad(self) or self.theme >= 1 or quote[1] is None:
+            return None
+        eighth = max(round(60 / self.pace * TIME_RESOLUTION / 2), 1)
+        if not any(phrase and abs(self._tick(phrase[0][0]) - quote[0]) <= 1 for phrase in self.quotes.values()):
+            return None
+        line, to = self._my_line(), self._seconds(quote[0])
+        leading = self.leads is not None and abs(self.leads - to) < 0.02
+        begins = earliest if leading or not line else max(earliest, line[-1][0] + self.breath)
+        if quote[0] - begins < 2 * eighth:
+            return None
+        self.leads = to
+        return begins, quote[0] - eighth, eighth
+
+    def _shortest(self, unit=None):
+        """The ticks a note of its solo lasts at least: DETACHED of the division of the beat it plays in (`unit`
+        ticks), or of an eighth, the short one when the tune swings."""
+        eighth = 60 / self.pace * TIME_RESOLUTION * self._and()
+        return min(max(round(DETACHED * (unit or eighth)), 1), MAX_DUR - 1)
 
     def _stab(self, earliest):
         """The ticks (first, last) at which the chord it owes next under its own solo may begin, or None: the other
@@ -718,9 +756,12 @@ class DuoSession:
             bars, notes = self._rhythm(start, chance)
         phrase = []
         if notes:
-            swing = chart.swung(self)   # an eighth off the beat falls on its last third
-            phrase = [(start + (at_ + (1 / 6 if swing and abs(at_ % 1 - 0.5) < 0.04 else 0)) * beat, pitch,
-                       max(round(lasts * beat * TIME_RESOLUTION), 1)) for at_, lasts, pitch in notes]
+            # an eighth off the beat falls on its last third, when the tune swings: not one with a note after it
+            # before the next beat (a sixteenth), which it would crowd
+            swings = lambda k: chart.swung(self) and abs(notes[k][0] % 1 - 0.5) < 0.04 and not (
+                k + 1 < len(notes) and notes[k + 1][0] < math.floor(notes[k][0]) + 0.96)
+            phrase = [(start + (at_ + (1 / 6 if swings(k) else 0)) * beat, pitch,
+                       max(round(lasts * beat * TIME_RESOLUTION), 1)) for k, (at_, lasts, pitch) in enumerate(notes)]
             if found:
                 self.quoting = (found[0], phrase[-1][0])
             if found and before and solos and not ballad and rng.random() < self.pickup:
@@ -732,7 +773,9 @@ class DuoSession:
             else:   # detached: no note sounds into the next
                 gap = lambda k: next((round((after - phrase[k][0]) * TIME_RESOLUTION * DETACHED)
                                       for after, *_ in phrase[k + 1:] if after > phrase[k][0] + 0.01), MAX_DUR)
-                phrase = [(seconds, pitch, max(min(lasts, gap(k)), 1)) for k, (seconds, pitch, lasts) in enumerate(phrase)]
+                # nor is one a blip: a horn's shortest notes, as transcribed, are too short for a piano's
+                phrase = [(seconds, pitch, max(min(max(lasts, self._shortest()), gap(k)), 1))
+                          for k, (seconds, pitch, lasts) in enumerate(phrase)]
             # a note of its own: the next one given it is on its way to, and whether it lasts a beat
             given = [k for k, note in enumerate(phrase) if note[1] is not None]
             phrase = [note if note[1] is not None else

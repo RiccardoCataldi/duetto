@@ -446,6 +446,38 @@ class DuoSessionTest(unittest.TestCase):
         ways = {chart.way(session, at) for session.varied in range(40) for at in range(0, 64, 4)}
         self.assertFalse(ways & {'blues', 'pentatonic', 'major_pentatonic'})   # not over a ballad
 
+    def test_no_note_of_its_solo_is_a_blip_its_own_or_a_soloists(self):
+        for licks_ in (0, 1):
+            session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1,
+                                 part=2, licks=licks_)             # 120 bpm: a swung eighth's short half is 0.167 s
+            session.begin()
+            notes, end = [], self.clock.t + 32
+            while self.clock.t < end:
+                self.clock.t += 0.1
+                while session.ahead() < duo.LOOKAHEAD:
+                    notes.append(session.play())
+            solo = [note for note in notes if note[3] == 'solo']
+            self.assertGreater(len(solo), 20)
+            gaps = [b[0] - a[0] for a, b in zip(solo, solo[1:])] + [9]
+            for (_, lasts, *_), gap in zip(solo, gaps):          # 0.8 of it, unless the next note comes sooner
+                self.assertGreaterEqual(lasts, min(0.09, 0.7 * gap), (licks_, lasts, gap))
+
+    def test_between_two_phrases_it_quotes_its_own_line_leads_into_the_next_after_a_breath(self):
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1,
+                             part=2, breath=30)                  # 120 bpm: an eighth is 25 ticks
+        session.begin()
+        note = lambda tick, pitch: session.seq.extend([TIME_OFFSET + tick, DUR_OFFSET + 20, NOTE_OFFSET + 4 * MAX_PITCH + pitch])
+        note(100, 70)                                            # its last note, on the third beat of the first bar
+        session.quotes = {0: [], 1: [(2.0, 72, 20), (2.5, 74, 20)]}   # the next phrase begins with the second bar
+        self.assertEqual(session._lead((200, 72, 20), 115), (130, 175, 25))   # after its breath, to an eighth before
+        self.assertEqual(session._lead((200, 72, 20), 140), (140, 175, 25))   # begun: no more breaths
+        self.assertIsNone(session._lead((250, 74, 20), 140))     # no first note: the phrase is under way
+        self.assertIsNone(session._lead((200, 72, 20), 170))     # no room for two eighths
+        session.leads, session.breath = None, 150
+        self.assertIsNone(session._lead((200, 72, 20), 115))     # a longer breath: it waits for the phrase
+        session.breath, session.style = 30, 3
+        self.assertIsNone(session._lead((200, 72, 20), 115))     # over a ballad its silences are planned
+
     def test_its_solo_may_say_a_run_twice_as_a_motif_and_never_a_third_time(self):
         note = lambda pitch: NOTE_OFFSET + 4 * MAX_PITCH + pitch
         line = [(k * 30, note(pitch)) for k, pitch in enumerate((60, 62, 64, 67, 60, 62))]
