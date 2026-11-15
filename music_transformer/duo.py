@@ -726,8 +726,8 @@ class DuoSession:
         quote = lambda library, fastest=0: licks.quote(
             library, rng, chords, low, high, near, self.quoting and self.quoting[0].split(' · ')[0], ahead, fastest,
             ballad)
-        rests = ballad and self.rested > bar * chart.BEATS + licks.UPBEAT
         states = solos and self.theme >= 1 and bool(tune.theme)   # the theme as written, and silence between its phrases
+        rests = ballad and not states and self.rested > bar * chart.BEATS + licks.UPBEAT
         theme = solos and not rests and (states or chance.random() < self.theme) and tune.theme.get(bar % len(tune.bars))
         found, notes, bars = None, [], 1
         if theme:
@@ -767,7 +767,7 @@ class DuoSession:
             if found and before and solos and not ballad and rng.random() < self.pickup:
                 phrase = self._pickup(before[-1], bar * chart.BEATS + found[1][0][0], phrase[0][1]) + phrase
             if ballad:
-                phrase = self._sung(phrase, chance)
+                phrase = self._sung(phrase, chance, states)
                 if phrase and phrase[-1][1] is None:   # where its own phrase is going
                     phrase[-1] = (phrase[-1][0], self._arrival(phrase[-1][0], near, low, high, chance), phrase[-1][2])
             else:   # detached: no note sounds into the next
@@ -796,12 +796,19 @@ class DuoSession:
             self.rhythm = licks.rhythm(chance, SPARSE + (DENSE - SPARSE) * built, TRIPLET, STAYS + (1 - STAYS) * built)
         return self.rhythm[0], [(at, lasts, None) for at, lasts in self.rhythm[1]]
 
-    def _sung(self, phrase, chance):
+    def _sung(self, phrase, chance, written=False):
         """`phrase`, [(seconds, pitch, ticks it lasts), ...], as a ballad is played: none of it before the phrase
         before and its silence are over (fewer than two notes left: nothing); a little behind the beat, all of it
         as much (LAID_BACK); legato, each note held until the next when that comes within TIED beats; its last note
-        held (HOLD). Then a silence (SPACE), shorter as its solo builds: no phrase begins before `rested`."""
+        held (HOLD). Then a silence (SPACE), shorter as its solo builds: no phrase begins before `rested`.
+        `written`: a phrase of the theme it states: all of it, its last note as long as written, and its own silences."""
         beat = 60 / self.pace
+        if written:
+            late, last = chance.uniform(0, LAID_BACK), len(phrase) - 1
+            gap = lambda k: next((min(after - phrase[k][0], TIED * beat) for after, *_ in phrase[k + 1:]
+                                  if after > phrase[k][0] + 0.01), phrase[k][2] / TIME_RESOLUTION)
+            return [(seconds + late, pitch, min(max(round(gap(k) * TIME_RESOLUTION) - 1, 1), MAX_DUR - 1))
+                    for k, (seconds, pitch, _) in enumerate(phrase)]
         phrase = [note for note in phrase if note[0] >= self.began + self.rested * beat - 0.01]
         if len(phrase) < 2:
             return []
