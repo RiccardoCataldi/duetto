@@ -391,6 +391,10 @@ def live(port_name, server):
     (roll, view, side), clock, started = layout(), pygame.time.Clock(), time.monotonic()
     while True:
         for event in pygame.event.get():
+            if panel.typing() and event.type in (pygame.KEYDOWN, pygame.KEYUP):   # a tempo being typed: its keys,
+                if event.type == pygame.KEYDOWN:                                   # Escape too, are the panel's
+                    panel.handle(event, side.topleft)
+                continue
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 return
             if not typed and event.type == pygame.KEYDOWN:

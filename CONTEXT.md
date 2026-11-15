@@ -24,8 +24,9 @@ What the model plays over a Tune: **Comps**, **Solos** or **Duet** (comps while 
 _Avoid_: role (that is a Character control), preset
 
 **Style**:
-How any Tune is played: **Swing** (swung eighths, a walking bass), **Bossa** (even eighths, a bossa's bass) or
-**Even 8ths** (even eighths, a walking bass). Yours to choose, as in iReal Pro: a Tune never says its own.
+How any Tune is played: **Swing** (swung eighths, a walking bass), **Bossa** (even eighths, a bossa's bass),
+**Even 8ths** (even eighths, a walking bass) or **Ballad** (swung eighths and triplets, a bass in two, long chords, phrases
+no faster than triplets). Yours to choose, as in iReal Pro: a Tune never says its own.
 _Avoid_: genre, feel, groove (that is a Character control)
 
 **Voicing**:

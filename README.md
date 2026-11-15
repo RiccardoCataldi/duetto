@@ -24,7 +24,7 @@ No MIDI keyboard? The laptop's keys play, as in Ableton Live: `A W S E D F T G Y
 
 ## Playing a tune
 
-The **player** sits on top of the panel, whichever the tab, as in iReal Pro: **Play** (or the space bar) counts the tune in, **Stop** silences it; it never starts by itself. Beside it the tune and the bar it is on, and under it a light for each beat of the bar (amber through the count-in), the **tempo** (the tune's, or one you fix with the arrows, Shift for five bpm; a click on the number gives it back the tune's) and the **Metronome** (`M`).
+The **player** sits on top of the panel, whichever the tab, as in iReal Pro: **Play** (or the space bar) counts the tune in, **Stop** silences it; it never starts by itself. Beside it the tune and the bar it is on, and under it a light for each beat of the bar (amber through the count-in), the **tempo** (the tune's, or one you fix with the arrows, Shift for five bpm, or type it: click the number, type the digits, Enter; Enter with nothing typed gives it back the tune's, Esc leaves it as it was) and the **Metronome** (`M`).
 
 Pick a tune in **Play** and its page appears. Choose its **Style**, whatever the tune: a tune is only its chords, and how it is played is yours to choose.
 
@@ -33,6 +33,7 @@ Pick a tune in **Play** and its page appears. Choose its **Style**, whatever the
 | **Swing** | swung eighths over a walking bass |
 | **Bossa** | even eighths over a bossa's bass: root and fifth on 1, the and of 2, 3, the and of 4 |
 | **Even 8ths** | even eighths over a walking bass |
+| **Ballad** | swung eighths and triplets, never faster, over a bass in two (root on 1, fifth on 3, held); held chords under its solo, on one, three or pushing the next bar, varied bar by bar; only the soloists' phrases no faster than triplets |
 
 And its **Part**:
 
@@ -72,7 +73,7 @@ bpm: 120
 Cm7 | F7 | Bbmaj7 | Ebmaj7 | Am7b5 | D7 | Gm6 | % |
 ```
 
-A chart holds no style: swing, bossa or even eighths is chosen in the panel.
+A chart holds no style: swing, bossa, even eighths or ballad is chosen in the panel.
 
 ## How it works
 

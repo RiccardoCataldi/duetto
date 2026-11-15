@@ -162,6 +162,11 @@ class DuoSessionTest(unittest.TestCase):
             self.assertEqual((chart.swung(self.session), self.session._bossa()), (False, True), tune)   # bossa
             self.session.turn(style=2)
             self.assertEqual((chart.swung(self.session), self.session._bossa()), (False, False), tune)  # even 8ths
+            self.session.turn(style=3)
+            self.assertEqual((chart.swung(self.session), self.session._bossa(), chart.ballad(self.session)),
+                             (True, False, True), tune)                                                 # ballad
+        self.session.turn(style=0)
+        self.assertFalse(chart.ballad(self.session))
 
     def test_over_a_tune_its_bass_walks_root_first_and_approaches_the_next_chord(self):
         self.session.turn(chart=self.tune('blues_in_f'), playing=1, part=0)   # F7 | Bb7: a beat is 0.545 s
@@ -284,6 +289,60 @@ class DuoSessionTest(unittest.TestCase):
         self.assertIn(second(1.5)[1], (0, 7))                    # or its third C, its seventh G
         self.assertEqual(second(3.5)[0], 11)                     # ahead of Bm7b5: B
         self.assertEqual(second(3.5)[1], 0)                      # or C, a semitone over it
+
+    def test_over_a_ballad_its_bass_plays_in_two_root_on_one_and_fifth_on_three_each_note_held(self):
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('misty'), playing=1, part=0,
+                             style=3, bpm=60, skips=0.5)   # a beat is 1 s; no skip notes, however many it is asked for
+        session.hear(0.0, 0.3, 60)
+        notes = []
+        for _ in range(240):
+            self.clock.t += 0.1
+            while session.ahead() < duo.LOOKAHEAD:
+                notes.append(session.play())
+        bass = [n for n in notes if n and n[3] == 'bass']
+        at = [n[0] % 4 for n in bass]                            # in beats, in the bar
+        self.assertGreater(len(bass), 8)                         # 6 bars: 12 notes
+        self.assertTrue(all(min(abs(a - p) for p in (0, 2, 4)) < 0.15 for a in at), at)   # on 1 and 3 only
+        self.assertGreater(sum(abs(a - 2) < 0.15 for a in at), 2)
+        self.assertTrue(all(abs(a[1] - (b[0] - a[0])) < 0.03 for a, b in zip(bass, bass[1:])))   # held to the next
+
+        def bass(beat):                                          # Ebmaj7 | Bbm7 Eb7 | ...
+            return int(session._partner(session._tick(beat), [], (36, 51), False)[36:52].argmax()) + 36
+        self.assertEqual((bass(0.02) % 12, bass(2) % 12), (3, 10))   # Eb, then its fifth Bb
+        self.assertEqual((bass(4.02) % 12, bass(6) % 12), (10, 3))   # Bbm7, then Eb7's root where it begins
+
+    def test_over_a_ballad_its_solo_keeps_to_eighths_and_triplets_and_comps_long_chords_on_one(self):
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('misty'), playing=1, part=1,
+                             style=3, bpm=60, arc=1)
+        feels = {chart.feel(session, session.began + at) for session.varied in range(100) for at in range(0, 128, 8)}
+        self.assertLessEqual(feels, {0, 2, 3})                   # never sixteenths or faster, even at its height
+        figures = [tuple(round(spot, 2) for spot in chart.stabs(session, bar)) for bar in range(32)]
+        self.assertGreater(len(set(figures)), 3, figures)        # not always on one: it varies, bar by bar
+        self.assertTrue(all(figure and len(figure) <= 3 for figure in figures), figures)   # few chords, never none
+        for bar in (1, 3, 5, 7, 9, 11, 13):                      # Bbm7 Eb7, Abm7 Db7...: each chord on its own beat
+            self.assertEqual(figures[bar][:2], (0, 2), bar)
+        session.hear(0.0, 0.3, 60)                               # then you rest: it solos
+        notes = []
+        for _ in range(300):
+            self.clock.t += 0.1
+            while session.ahead() < duo.LOOKAHEAD:
+                notes.append(session.play())
+        under = [n for n in notes if n and n[3] == 'chords' and duo.UNDER[0] <= n[2] <= duo.UNDER[1]
+                 and n[0] >= session.began + 8]
+        self.assertGreater(len(under), 6)
+        self.assertTrue(all(n[1] >= 0.95 for n in under), under)   # held: a beat or more
+
+    def test_over_a_ballad_it_quotes_the_soloists_phrases_no_faster_than_triplets(self):
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('misty'), playing=1, part=2,
+                             style=3, bpm=60, licks=1)
+        session.hear(0.0, 0.3, 60)
+        for bar in range(16):
+            session._lick(session._tick(session.began + bar * 4 + 0.01))
+        phrases = {id(phrase): phrase for phrase in session.quotes.values() if phrase}.values()
+        self.assertGreater(len(phrases), 1)                      # licks at the top: it quotes them
+        for phrase in phrases:                                   # a beat is 1 s: never closer than a triplet
+            onsets = sorted({round(seconds, 3) for seconds, *_ in phrase})
+            self.assertTrue(all(b - a > 1 / 3 - 0.02 for a, b in zip(onsets, onsets[1:])), onsets)
 
     def test_over_a_tune_its_right_hand_plays_on_though_the_model_would_rather_walk_its_bass_alone(self):
         class Bassist(UniformModel):

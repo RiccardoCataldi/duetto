@@ -2,7 +2,7 @@
 The controls beside the piano roll. On top, always in sight, the player, as in iReal Pro: Play or Stop, the Tune and
 where it is, a light on each beat of the bar (amber through the count-in), the tempo and the metronome. Below, two
 tabs:
-- Play: the Tune, its Style (swing, bossa, even 8ths: yours to choose, whatever the tune), the Part it plays; the
+- Play: the Tune, its Style (swing, bossa, even 8ths, ballad: yours to choose, whatever the tune), the Part it plays; the
   Character (density, harmony, role...), each control turning some of the model's Knobs (see
   music_transformer/server.py, "knobs"); the octaves it may play
 - Sound: the band (its solo, its chords and its bass, each on an instrument of its own: a preset, or one by one) and
@@ -48,7 +48,7 @@ MIND_FILE = os.path.expanduser('~/.config/ai-duet/knobs.json')
 MACROS = [
     ('density', ('sparse', 'dense'), "how many notes it plays",
      {'min_step': (60, 20, 8), 'max_rest': (500, 200, 100), 'phrase': (6, 16, 40), 'breath': (300, 150, 50),
-      'skips': (0.0, 0.12, 0.3)}),
+      'skips': (0.0, 0.06, 0.15)}),
     ('harmony', ('inside', 'outside'), "how far it strays from the scale of the bar's chord, and how it colours the chord",
      {'out_of_key': (5.0, 2.0, 0.0), 'chord_tone': (3.0, 1.0, 0.0), 'tension': (0.0, 1.0, 3.0)}),
     ('role', ('accompanies', 'leads'), "while you play: it keeps apart from your hands and under your melody, or goes "
@@ -79,8 +79,10 @@ PARTS = [('comps', 0, "it comps, with a walking bass, for you to solo"),
 # the Styles, in the order of the knob `style` (music_transformer/chart.py, STYLES): name, how it plays any tune
 STYLES = [('swing', "swung eighths over a walking bass"),
           ('bossa', "even eighths over a bossa's bass: root and fifth on 1, the and of 2, 3, the and of 4"),
-          ('even 8ths', "even eighths over a walking bass")]
+          ('even 8ths', "even eighths over a walking bass"),
+          ('ballad', "swung eighths and triplets over a bass in two, long chords, phrases no faster than triplets")]
 SLOWEST = 40              # bpm the player's tempo goes down to
+PIANOS = range(8)         # the General MIDI pianos: a bass on one plays no skip notes, a bassist's eighths
 LIGHTS_H = 12             # the player's beat lights
 
 # who plays, in the Sound tab: the channel (sound.py), who it is, its colour (the piano roll's)
@@ -167,6 +169,7 @@ class Mind:
                 self.saved = json.load(f)
         except (OSError, ValueError):
             self.saved = {}
+        self.bassist = lambda: True   # whether its bass sounds on a bassist's instrument, not a piano (the Panel says)
         self.macros = [Knob(label, 0.5, 0, 1, 0.5, 'macro', what, False, self._macro, ends)
                        for label, ends, what, _ in MACROS]
         self.turns = {label: turns for label, _, _, turns in MACROS}
@@ -218,7 +221,7 @@ class Mind:
         for macro in self.macros:
             for name, anchors in self.turns[macro.name].items():
                 if name in knobs and name not in saved:   # not kept: it follows its control until you turn it
-                    knobs[name].value = along(anchors, macro.value)
+                    knobs[name].value = self._along(name, anchors, macro.value)
                     self.send(knobs[name], keep=False)
 
     def send(self, knob, keep=True):
@@ -260,7 +263,13 @@ class Mind:
             bpm.set(0)
             return
         now = bpm.value or (self.state or {}).get('bpm') or 120
-        bpm.set(min(max(round(now) + by, SLOWEST), bpm.high))
+        self.fix(round(now) + by)
+
+    def fix(self, bpm):
+        """Fixes the tempo at `bpm`, within SLOWEST and the fastest it keeps to; None: the tune's again."""
+        if 'bpm' in self.knobs:
+            knob = self.knobs['bpm']
+            knob.set(0 if bpm is None else min(max(bpm, SLOWEST), knob.high))
 
     def beat(self):
         """(the beat of the bar it is on, from 0, and whether it is the count-in's), or None while the tune is
@@ -272,10 +281,20 @@ class Mind:
         at += (time.monotonic() - self.heard) * state['bpm'] / 60
         return int(at % 4), at < 0
 
+    def _along(self, name, anchors, value):
+        """The value of the knob `name` that a control at `value` turns: none of a bassist's skip notes on a piano."""
+        return 0 if name == 'skips' and not self.bassist() else along(anchors, value)
+
+    def rebass(self):
+        """Its bass is on another instrument: its skip notes as its density says, or none on a piano."""
+        for macro in self.macros:
+            if 'skips' in self.turns[macro.name] and 'skips' in self.knobs:
+                self.knobs['skips'].set(self._along('skips', self.turns[macro.name]['skips'], macro.value))
+
     def _macro(self, macro):
         for name, anchors in self.turns[macro.name].items():
             if name in self.knobs:
-                self.knobs[name].set(along(anchors, macro.value))
+                self.knobs[name].set(self._along(name, anchors, macro.value))
         self._saved('macros')[macro.name] = macro.value
         self._save()
 
@@ -319,6 +338,9 @@ class Panel:
         self.mind = Mind(address, mind_file)
         self.address = address
         self.sounds = {player: sound_knobs(engine, player, who, accent) for player, who, accent in VOICES}
+        bass = self.sounds[sound.BASS]['instrument']   # on a piano, its bass plays no skip notes
+        self.mind.bassist = lambda: round(bass.value) not in PIANOS
+        bass.turned = lambda knob, sounds=bass.turned: (sounds(knob), self.mind.rebass())
         # title, colour, its sections (title, knobs or cards) once there are knobs
         self.tabs = [('Play', AI, self._play_sections), ('Sound', YOU, self._sound_sections)]
         self.tab = 0
@@ -326,6 +348,7 @@ class Panel:
         self.held = None          # (knob, x where the drag started, value then, pixels across its range)
         self.hover = None         # the target under the mouse: (kind, what, rect)
         self.last_click = (None, 0)
+        self.typed = None         # the digits of a tempo being typed, once its number is clicked
         self.targets = []         # (kind, what, rect) of what can be clicked, from the last draw
         self.content = pygame.Rect(0, HEADER_H, PANEL_W, 0)
         self.overflow = 0         # how far the content of the tab shown can scroll
@@ -389,8 +412,28 @@ class Panel:
 
     # the mouse and the keys
 
+    def typing(self):
+        """Whether a tempo is being typed: the keys are the panel's until Enter, Escape or a click."""
+        return self.typed is not None
+
+    def _type(self, event):
+        """A key while the tempo is typed: a digit (up to three), Backspace; Enter fixes it (nothing typed: the
+        tune's again), Escape leaves it as it was."""
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self.mind.fix(int(self.typed) if self.typed else None)
+            self.typed = None
+        elif event.key == pygame.K_ESCAPE:
+            self.typed = None
+        elif event.key == pygame.K_BACKSPACE:
+            self.typed = self.typed[:-1]
+        elif event.unicode.isdigit() and len(self.typed) < 3:
+            self.typed += event.unicode
+
     def handle(self, event, origin):
         """Mouse and key events, at `origin` the panel's top left corner on screen."""
+        if event.type == pygame.KEYDOWN and self.typing():
+            self._type(event)
+            return
         if event.type == pygame.MOUSEWHEEL:
             x, y = pygame.mouse.get_pos()
             target = self._at((x - origin[0], y - origin[1]))
@@ -422,6 +465,7 @@ class Panel:
             self._click(pos)
 
     def _click(self, pos):
+        self.typed = None   # a click anywhere leaves a tempo being typed as it was
         target = self._at(pos)
         if target is None:
             return
@@ -533,7 +577,8 @@ class Panel:
         text(surface, 'TEMPO', 11, MUTED, (PAD, y), bold=True)
         fixed = ready and knobs['bpm'].value > 0
         if ready:
-            text(surface, 'fixed · click to reset' if fixed else "the tune's", 11, FAINT, (PAD + 52, y))
+            text(surface, 'Enter · Esc' if self.typing() else 'fixed · click to type' if fixed else
+             "the tune's · click to type", 11, FAINT, (PAD + 52, y))
         text(surface, 'METRONOME', 11, MUTED, (width - PAD, y), bold=True, anchor='topright')
         tempo = pygame.Rect(PAD, y + 18, round((width - 2 * PAD) * 0.6), 40)
         bpm = state.get('bpm')
@@ -549,9 +594,14 @@ class Panel:
                 self.targets.append(('card', (name, what, False, turn), arrow))
         middle = tempo.inflate(-88, 0)
         if ready:
-            self.targets.append(('card', ('Tempo', "Its tempo: the tune's, or one you fix with the arrows; a click "
-                                          "here gives it back the tune's", False, self.mind.tempo), middle))
-        number = text(surface, str(round(bpm)) if bpm else '—', 20, AI if fixed else TEXT,
+            self.targets.append(('card', ('Tempo', "Its tempo: the tune's, or one you fix with the arrows or "
+                                          "type here, Enter; nothing typed, Enter: the tune's again", False,
+                                          lambda: setattr(self, 'typed', '')), middle))
+        if self.typing():
+            pygame.draw.rect(surface, AI, middle.inflate(0, -8), 1, border_radius=6)
+        shown = self.typed + ('|' if time.monotonic() % 1 < 0.5 else ' ') if self.typing() else \
+            str(round(bpm)) if bpm else '—'
+        number = text(surface, shown, 20, AI if fixed or self.typing() else TEXT,
                       (middle.centerx - 14, tempo.centery), bold=True, anchor='center')
         text(surface, 'bpm', 12, MUTED, (number.right + 5, tempo.centery + 2), anchor='midleft')
         clicks = ready and bool(knobs['metronome'].value)

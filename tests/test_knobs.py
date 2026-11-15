@@ -116,7 +116,7 @@ class PanelTest(unittest.TestCase):
         for name, low, high, unit in (('chart', 1, 3, 'choice:autumn_leaves/blues_in_f/misty'),
                                       ('playing', 0, 1, 'choice:stopped/playing'), ('metronome', 0, 1, 'choice:off/on'),
                                       ('bpm', 0, 240, 'bpm'), ('part', 0, 2, 'choice:comps/duet/solos'),
-                                      ('style', 0, 2, 'choice:swing/bossa/even_8ths'),
+                                      ('style', 0, 3, 'choice:swing/bossa/even_8ths/ballad'),
                                       ('lowest', 0, 8, 'octave_from'), ('highest', 0, 8, 'octave_to')):
             mind.knobs[name] = knobs.Knob(name, low, low, high, low, unit, '', True, mind.send)
         return mind
@@ -149,11 +149,62 @@ class PanelTest(unittest.TestCase):
         self.click(self.card('Slower').center)
         self.assertEqual(mind.knobs['bpm'].value, 109)
         self.click(self.card('Tempo').center)
-        self.assertEqual(mind.knobs['bpm'].value, 0)     # the tune's again
+        self.type('\r')                                  # nothing typed: the tune's again
+        self.assertEqual(mind.knobs['bpm'].value, 0)
         mind.tempo(-500)
         self.assertEqual(mind.knobs['bpm'].value, knobs.SLOWEST)
         mind.knobs['chart'].set(2)
         self.assertEqual(mind.knobs['bpm'].value, 0)
+
+    def type(self, keys):
+        """Presses each of `keys`: a digit, '\b' Backspace, '\r' Enter, '\x1b' Escape."""
+        named = {'\b': self.pygame.K_BACKSPACE, '\r': self.pygame.K_RETURN, '\x1b': self.pygame.K_ESCAPE}
+        for key in keys:
+            self.panel.handle(self.pygame.event.Event(self.pygame.KEYDOWN, key=named.get(key, ord(key)), unicode=key,
+                                                      mod=0), (0, 0))
+
+    def test_the_tempo_is_typed_once_its_number_is_clicked(self):
+        mind = self.served()
+        mind.state = {'bpm': 72, 'chart': {'title': 'Misty', 'bars': [['Ebmaj7']] * 32, 'bar': -1, 'beat': 0}}
+        self.assertFalse(self.panel.typing())
+        self.click(self.card('Tempo').center)
+        self.assertTrue(self.panel.typing())             # its keys are the panel's now, not the piano's
+        self.type('6x05\b')                              # a digit at a time; others left out; Backspace
+        self.assertEqual(mind.knobs['bpm'].value, 0)     # not yet
+        self.panel.draw(self.surface)                    # what is typed is shown in its place
+        self.type('\r')
+        self.assertEqual(mind.knobs['bpm'].value, 60)
+        self.assertFalse(self.panel.typing())
+        self.click(self.card('Tempo').center)
+        self.type('9999\r')
+        self.assertEqual(mind.knobs['bpm'].value, 240)   # within its range
+        self.click(self.card('Tempo').center)
+        self.type('5\r')
+        self.assertEqual(mind.knobs['bpm'].value, knobs.SLOWEST)
+        self.click(self.card('Tempo').center)
+        self.type('90\x1b')                              # Escape: as it was
+        self.assertEqual(mind.knobs['bpm'].value, knobs.SLOWEST)
+        self.assertFalse(self.panel.typing())
+        self.click(self.card('Tempo').center)
+        self.type('90')
+        self.click(self.card('Metronome').center)        # a click elsewhere leaves it be too
+        self.assertFalse(self.panel.typing())
+        self.assertEqual(mind.knobs['bpm'].value, knobs.SLOWEST)
+
+    def test_its_bass_on_a_piano_plays_no_skip_notes_whatever_the_density(self):
+        mind = self.served()
+        mind.knobs['skips'] = knobs.Knob('skips', 0.06, 0, 0.5, 0.06, '', '', False, mind.send)
+        density = next(macro for macro in mind.macros if macro.name == 'density')
+        density.set(1)
+        self.assertAlmostEqual(mind.knobs['skips'].value, 0.15)   # a bassist's, dense: an eighth now and then
+        bass = self.panel.sounds[knobs.sound.BASS]['instrument']
+        bass.set(0)                                               # its bass on a piano: none
+        self.assertEqual(mind.knobs['skips'].value, 0)
+        density.set(0.5)
+        density.set(1)
+        self.assertEqual(mind.knobs['skips'].value, 0)            # however its density turns
+        bass.set(32)                                              # an acoustic bass again: as dense as it is
+        self.assertAlmostEqual(mind.knobs['skips'].value, 0.15)
 
     def test_the_lights_run_on_at_the_tempo_from_the_last_state_heard(self):
         mind = self.served()
@@ -171,7 +222,7 @@ class PanelTest(unittest.TestCase):
         self.click(self.card('bossa').center)
         self.assertEqual(mind.knobs['style'].value, 1)
         names = {what[0] for kind, what, _ in self.panel.targets if kind == 'card'}
-        self.assertTrue({'swing', 'bossa', 'even 8ths', 'comps', 'duet', 'solos'} <= names)
+        self.assertTrue({'swing', 'bossa', 'even 8ths', 'ballad', 'comps', 'duet', 'solos'} <= names)
         self.assertNotIn('trade fours', names)
         self.assertEqual(len(self.panel.tabs), 2)        # Play and Sound: no Advanced
 

@@ -18,18 +18,25 @@ ROOTS = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
 COUNT = 1   # bars of metronome before a chart begins: the count-in
 BEATS = 4   # shortcut: every chart is in 4/4; give a chart its own `meter` when one in 3/4 is wanted
 # the Styles any tune can be played in (the session's `style` knob): swung eighths over a walking bass; even eighths
-# over a bossa's bass (root and fifth on 1, the and of 2, 3, the and of 4); even eighths over a walking bass
-STYLES = ('swing', 'bossa', 'even_8ths')
+# over a bossa's bass (root and fifth on 1, the and of 2, 3, the and of 4); even eighths over a walking bass; a ballad:
+# swung eighths and triplets, never faster, over a bass in two (root on 1, fifth on 3, each note held), long chords
+# on one under its solo, and only the soloists' phrases no faster than triplets
+STYLES = ('swing', 'bossa', 'even_8ths', 'ballad')
 
 
 def swung(session):
     """Whether the session's eighths are swung: the second of each beat on its last third."""
-    return STYLES[session.style] == 'swing'
+    return STYLES[session.style] in ('swing', 'ballad')
 
 
 def bossa(session):
     """Whether the session's bass plays a bossa's figure instead of walking."""
     return STYLES[session.style] == 'bossa'
+
+
+def ballad(session):
+    """Whether the session plays the tune as a ballad: its bass in two, long chords, no fast runs."""
+    return STYLES[session.style] == 'ballad'
 
 
 def chord(name):
@@ -121,13 +128,22 @@ def way(session, seconds):
 # the beats of a bar on which it comps a chord under its own solo, as often as each is here: on one, on the "and" of
 # two (the Charleston), both, pushing the next bar, or none
 STABS = ((), (), (0,), (0,), (1.5,), (1.5,), (0, 1.5), (0, 2.5), (1.5, 3.5), (3.5,))
+# over a ballad, held chords: on one, on one and three, on three, on one and pushing the next bar from the and of four,
+# that push alone, or on the and of two; where the bar has two chords, each on its own beat, and the next pushed now
+# and then
+BALLAD_STABS = ((0,), (0,), (0, 2), (0, 2), (2,), (0, 3.5), (3.5,), (1.5,))
+CHANGING = ((0, 2), (0, 2), (0, 2, 3.5))
 
 
 def stabs(session, bar):
     """The beats from the line of the bar `bar` (counted on through the choruses) on which it comps a chord under
-    its own solo: others, by chance, each bar; an "and" on the last third of its beat when its Style swings."""
-    swing = swung(session)
-    return [spot + (1 / 6 if swing and spot % 1 else 0) for spot in random.Random(session.varied * 13 + 5 + bar).choice(STABS)]
+    its own solo: others, by chance, each bar; an "and" on the last third of its beat when its Style swings; over a
+    ballad, fewer and held (BALLAD_STABS), each chord of a bar that has two on its own beat (CHANGING)."""
+    swing, figures = swung(session), STABS
+    if ballad(session):
+        tune = CHARTS[session.chart - 1]
+        figures = CHANGING if len(tune.bars[bar % len(tune.bars)]) > 1 else BALLAD_STABS
+    return [spot + (1 / 6 if swing and spot % 1 else 0) for spot in random.Random(session.varied * 13 + 5 + bar).choice(figures)]
 
 
 SPAN = 32     # bars its solo builds over, at least: as many whole choruses as make them
@@ -146,6 +162,7 @@ def build(session, seconds):
 FEELS = (2, 2, 2, 3, 3, 4, 4, 8, 0)   # how it divides the beat, as often as each is here; 0: out of time
 BUSY = {2: 0, 3: 1, 4: 2, 8: 3}       # how busy each is; out of time is a step away, wherever its solo is
 BUSIEST = 2.5                         # as busy as its solo gets at its height: sixteenths, or thirty-seconds
+BALLAD = (2, 2, 3, 0)                 # over a ballad: eighths, triplets or out of time, however far it has built
 
 
 def feel(session, seconds):
@@ -153,6 +170,8 @@ def feel(session, seconds):
     or 0, free of the beat. Another, by chance, every two bars: the nearer what its solo has built to (build), the
     more often, as much as its `arc` says."""
     phrase = beats(session, seconds) // PHRASE
+    if ballad(session):
+        return random.Random(session.varied * 31 + 1 + phrase).choice(BALLAD)
     height = BUSIEST * build(session, session.began + phrase * PHRASE * 60 / session.pace)
     return random.Random(session.varied * 31 + 1 + phrase).choices(
         FEELS, [math.exp(-2 * session.arc * abs(BUSY.get(feel, height + 1) - height)) for feel in FEELS])[0]

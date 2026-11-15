@@ -88,7 +88,9 @@ DETACHED = 0.8    # a note of a phrase it quotes lasts this much of the time to 
                   # line, on a piano, would sound its notes one over the other
 WALK = 4.0        # logit added to the root where its walking bass begins a bar or a chord
 BOSSA = (0, 1.5, 2, 3.5)   # beats of the bar its bass plays on over a bossa: 1, the and of 2, 3, the and of 4
-SKIPS = 0.12      # how often its walking bass plays a skip note, an eighth on the and of a beat
+TWO = (0, 2)      # and over a ballad, in two: 1 and 3, each note held until the next
+TRIPLET = 1 / 3 - 0.01   # beats: over a ballad, a soloist's phrase with two notes closer than a triplet is not quoted
+SKIPS = 0.06      # how often its walking bass plays a skip note, an eighth on the and of a beat
 LEGATO = 0.9      # how often its bass over a bossa holds a note until the next; the others last three quarters as
                   # long. Walking, it holds every note until the next: a bass line is legato
 EARLY = 0.15      # beats before a bar line your phrase may begin and still begin at it: you rushed, it is no upbeat
@@ -143,7 +145,7 @@ KNOBS = {
              "duet: it comps while you play and solos when you rest; or it solos as a jazz player does, for you to comp"),
     'style': (0, 0, len(chart.STYLES) - 1, 'choice:' + '/'.join(chart.STYLES), "the feel it plays any tune in: "
               "swing, swung eighths over a walking bass; bossa, even eighths over a bossa's bass; even 8ths, even "
-              "eighths over a walking bass"),
+              "eighths over a walking bass; ballad, swung eighths and triplets over a bass in two, long chords, only their phrases no faster than triplets"),
 }
 
 
@@ -372,9 +374,10 @@ class DuoSession:
                     mask[TIME_OFFSET + stab[0]:TIME_OFFSET + stab[1] + 1] = 0
                 if due is not None and not late and torch.isfinite(left[3][due + self.grid]):   # so has its bass,
                     mask[TIME_OFFSET + max(due, earliest):TIME_OFFSET + due + self.grid + 1] = 0   # off the beat too
-            elif slot == 1 and comp and bool(torch.isfinite(comp[3][self.seq[-1] - TIME_OFFSET])):   # a short chord
-                beat = round(60 / self.pace * TIME_RESOLUTION)
-                mask[DUR_OFFSET + min(10, beat // 2):DUR_OFFSET + min(beat + beat // 2, MAX_DUR - 1) + 1] = 0
+            elif slot == 1 and comp and bool(torch.isfinite(comp[3][self.seq[-1] - TIME_OFFSET])):   # a short chord,
+                beat = round(60 / self.pace * TIME_RESOLUTION)                                         # held over a ballad
+                shortest, longest = (beat, 3 * beat) if chart.ballad(self) else (min(10, beat // 2), beat + beat // 2)
+                mask[DUR_OFFSET + min(shortest, MAX_DUR - 1):DUR_OFFSET + min(longest, MAX_DUR - 1) + 1] = 0
             elif slot == 1 and quote and self.seq[-1] - TIME_OFFSET == quote[0]:   # as long as it was played, or shorter
                 mask[DUR_OFFSET + max(quote[2] // 2, 1):DUR_OFFSET + min(quote[2], MAX_DUR - 1) + 1] = 0
             elif slot == 1:
@@ -479,7 +482,8 @@ class DuoSession:
             if solos else \
             (self.me, self.min_step, max(self.chord, 3), within(COMP[0], COMP[1]))
         # the least between its notes: a beat, half of one over a bossa, or with skip notes the and of the beat
-        beat = 60 / self.pace * TIME_RESOLUTION * (0.5 if self._bossa() else self._and() if self.skips else 1)
+        beat = 60 / self.pace * TIME_RESOLUTION * (0.5 if self._bossa() else 2 if chart.ballad(self) else
+                                                   self._and() if self.skips else 1)
         beat = max(round(beat) - self.grid - 1, 5)
         return [right] + ([(self.left, beat, 1, BASS)] if self._walks() else [])   # its octaves bound its right hand only
 
@@ -509,7 +513,7 @@ class DuoSession:
         hand; `comps`: the hand that comps under its solo, neither): the chord of the bar and its scale; where it
         plays against you (_register); after your phrase, its answer."""
         at, you_play = self._seconds(tick), tick - self.heard_at < PLAYING
-        if self._bossa() and not right and not comps:   # its bass keeps to its figure's notes
+        if (self._bossa() or chart.ballad(self)) and not right and not comps:   # its bass keeps to its figure's notes
             return self._bossa_bass(at, line).to(self.device)
         in_key = self.listener.in_key()
         chord_tone = max(self.chord_tone, chart.CHANGES)
@@ -638,8 +642,8 @@ class DuoSession:
                     last = rng.random() < self.echo / KNOBS['echo'][2]
                     found = quote({'players': [['you']], 'licks': {
                         under: mine[-1:] if last else mine for under, mine in self.yours.items()}})
-                if not found and solos:
-                    found = quote(licks.DATA, FASTEST / beat)
+                if not found and solos:   # over a ballad, only the phrases of theirs no faster than triplets
+                    found = quote(licks.DATA, max(FASTEST / beat, TRIPLET if chart.ballad(self) else 0))
                     if found:   # the phrase it may develop next, free of its key as a Lick is
                         self.motif = (found[0], [[at_, lasts, pitch - chords[0][0]] for at_, lasts, pitch in found[1]],
                                       found[2])
@@ -743,17 +747,19 @@ class DuoSession:
         self._crop(len(self.seq) - 2)
 
     def _bossa(self):
-        """Whether its bass plays a bossa's figure (BOSSA) over the tune instead of walking: its Style says."""
+        """Whether its bass plays a bossa's figure (BOSSA) over the tune instead of walking: its Style says (over a
+        ballad it plays in two, TWO, chart.ballad)."""
         return chart.bossa(self)
 
     def _bass_due(self, earliest, played):
         """The tick of the next note its bass owes from `earliest`, its last having been at `played`: on every beat,
         or over a bossa on its figure."""
         beat, origin = 60 / self.pace * TIME_RESOLUTION, self.began * TIME_RESOLUTION - self.base
-        figure = BOSSA if self._bossa() else range(chart.BEATS)
+        walks = not self._bossa() and not chart.ballad(self)
+        figure = BOSSA if self._bossa() else TWO if chart.ballad(self) else range(chart.BEATS)
         bar = math.floor((earliest - origin - self.grid) / beat / chart.BEATS)
         for at in (k * chart.BEATS + step for k in (bar, bar + 1, bar + 2) for step in figure):
-            for spot in (at, at + 1 - self._and()) if not self._bossa() and self._skip(at) else (at,):
+            for spot in (at, at + 1 - self._and()) if walks and self._skip(at) else (at,):
                 tick = round(origin + spot * beat)
                 if tick >= earliest - self.grid and played < tick - self.grid:   # a place that has no note yet
                     return tick
