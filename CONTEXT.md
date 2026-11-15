@@ -76,7 +76,7 @@ _Avoid_: transport bar
 ### Shaping it
 
 **Character**:
-The ten musical controls (density, harmony, role, dialogue, groove, risk, focus, memory, key follow, vocabulary),
+The eleven musical controls (density, breath, harmony, role, dialogue, groove, risk, focus, memory, key follow, vocabulary),
 each a musical intent.
 _Avoid_: macro (in the UI), musical controls
 

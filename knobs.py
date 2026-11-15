@@ -47,8 +47,9 @@ MIND_FILE = os.path.expanduser('~/.config/ai-duet/knobs.json')
 # the middle is the duo's default
 MACROS = [
     ('density', ('sparse', 'dense'), "how many notes it plays",
-     {'min_step': (60, 20, 8), 'max_rest': (500, 200, 100), 'phrase': (6, 16, 40), 'breath': (300, 150, 50),
-      'skips': (0.0, 0.06, 0.15)}),
+     {'min_step': (60, 20, 8), 'max_rest': (500, 200, 100), 'phrase': (6, 16, 40), 'skips': (0.0, 0.06, 0.15)}),
+    ('breath', ('short', 'long'), "the silence it leaves when its phrase ends, before the next",
+     {'breath': (30, 150, 500)}),
     ('harmony', ('inside', 'outside'), "how far it strays from the scale of the bar's chord, and how it colours the chord",
      {'out_of_key': (5.0, 2.0, 0.0), 'chord_tone': (3.0, 1.0, 0.0), 'tension': (0.0, 1.0, 3.0)}),
     ('role', ('accompanies', 'leads'), "while you play: it keeps apart from your hands and under your melody, or goes "

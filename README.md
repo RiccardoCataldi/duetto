@@ -58,7 +58,7 @@ The model's other knobs (`KNOBS` in [duo.py](music_transformer/duo.py)) keep the
 
 The **Band** puts each Voice of the model on an instrument of its own: its **solo**, its **chords** and its **bass**. Pick a preset (piano trio, vibes, two pianos) or an instrument for each; the piano roll shows each in its colour. Only the sound changes: the model plays the same notes.
 
-The **Character** is ten controls: density, harmony, role, dialogue, groove, risk, focus, memory, key follow, vocabulary. Hover one to read what it does.
+The **Character** is eleven controls: density, breath, harmony, role, dialogue, groove, risk, focus, memory, key follow, vocabulary. Hover one to read what it does.
 
 Keys: `Space` play/stop the tune, `M` the metronome, `F` (or `F11`) fullscreen, `K` (or `Tab`) hide the panel, `Esc` quit.
 
