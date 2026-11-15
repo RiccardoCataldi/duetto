@@ -24,7 +24,40 @@ class Out:
 class DuoTest(unittest.TestCase):
     def setUp(self):
         self.sent, self.out = [], Out()
-        self.duo = main.Duo(self.sent.append, self.out, started=100.0)
+        self.folder = self.enterContext(tempfile.TemporaryDirectory())   # the defaults, not your sound
+        self.duo = main.Duo(self.sent.append, self.out, started=100.0,
+                            sound_file=os.path.join(self.folder, 'sound.json'))
+
+    def test_with_its_pedal_a_chord_rings_until_the_next_is_struck(self):
+        values = main.sound.defaults()
+        values[main.sound.CHORDS]['pedal'] = 1                # its chords under a ballad
+        main.sound.save(values, self.duo.sound_file)
+        for line in ("note 2.000 0.300 60 chords\n", "note 2.000 0.300 64 chords\n", "note 3.500 0.300 62 chords\n"):
+            self.duo.receive(line)
+        self.duo.tick(102.0)
+        self.duo.tick(103.0)                                  # long after it was written to end: it rings on
+        offs = lambda: sorted(m[1] for m, channel in self.out.messages if channel == main.sound.CHORDS and m[0] == 0x80)
+        self.assertEqual(offs(), [])
+        self.duo.tick(103.5)                                  # the next chord: the pedal is changed
+        self.assertEqual(offs(), [60, 64])
+        self.duo.tick(103.5 + main.PEDAL_S)                   # and none rings for ever
+        self.assertEqual(offs(), [60, 62, 64])
+
+    def test_a_melodic_voice_plays_one_note_at_a_time_the_highest_of_a_chord(self):
+        values = main.sound.defaults()
+        values[main.sound.AI]['melodic'] = 1                 # its solo on a flute
+        main.sound.save(values, self.duo.sound_file)
+        for line in ("note 2.000 0.900 60\n", "note 2.000 0.900 67\n", "note 2.300 0.500 69\n",
+                     "note 2.000 0.900 60 chords\n", "note 2.000 0.900 64 chords\n"):
+            self.duo.receive(line)
+        self.duo.tick(102.0)
+        self.duo.tick(102.3)
+        solo = [(m[0] & 0xF0, m[1]) for m, channel in self.out.messages if channel == main.sound.AI]
+        self.assertEqual(solo, [(0x90, 67), (0x80, 67), (0x90, 69)])   # G4 alone, and A4 stops it
+        self.duo.tick(102.3 + 0.5)                            # as long as written: no ring
+        self.assertIn(([0x80, 69, 0], main.sound.AI), self.out.messages)
+        chords = sorted(m[1] for m, channel in self.out.messages if channel == main.sound.CHORDS and m[0] == 0x90)
+        self.assertEqual(chords, [60, 64])                    # its chords are not melodic: both
 
     def test_your_key_goes_to_the_model_at_once_with_a_guessed_duration(self):
         self.duo.note_on(60, 90, 101.5)
@@ -107,7 +140,8 @@ class DuoTest(unittest.TestCase):
         self.assertEqual(pedal, [0])   # the pedal down came before your first note, where the duo starts
 
     def test_its_top_voice_sings_over_its_inner_voices_and_its_left_hand(self):
-        self.duo = main.Duo(self.sent.append, self.out, started=100.0, rng=random.Random(0))
+        self.duo = main.Duo(self.sent.append, self.out, started=100.0, rng=random.Random(0),
+                            sound_file=os.path.join(self.folder, 'sound.json'))
         main_human, main.HUMAN = main.HUMAN, 0
         try:
             for line in ("note 2.000 0.500 60 right\n", "note 2.000 0.500 67 right\n", "note 2.000 0.500 43 left\n"):
@@ -123,7 +157,8 @@ class DuoTest(unittest.TestCase):
         levels = []
         for loud in (80, 127):
             out = Out()
-            duo = main.Duo(self.sent.append, out, started=100.0, rng=random.Random(0))
+            duo = main.Duo(self.sent.append, out, started=100.0, rng=random.Random(0),
+                           sound_file=os.path.join(self.folder, 'sound.json'))
             for i in range(6):
                 duo.note_on(60, loud, 100.0 + i * 0.1)
             duo.receive("note 5.000 0.500 64\n")

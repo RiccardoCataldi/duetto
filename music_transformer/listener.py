@@ -35,6 +35,10 @@ CHORD_SCALES = {
     'm6': ('melodic_minor', 'dorian'), 'mMaj7': ('melodic_minor', 'harmonic_minor'),
     'm7b5': ('locrian', (0, 2, 3, 5, 6, 8, 10)), 'dim': ((0, 2, 3, 5, 6, 8, 9, 11),), 'dim7': ((0, 2, 3, 5, 6, 8, 9, 11),),
     '+': ((0, 2, 4, 6, 8, 10),), '7#5': ((0, 2, 4, 6, 8, 10), (0, 1, 3, 4, 6, 8, 10))}   # whole tone; altered
+# the passing tone of each chord's bebop scale, in semitones above its root: with it the scale has eight notes, and
+# played in eighths its chord tones fall on the beat (a dominant's major seventh, a major chord's sharp fifth, a
+# minor seventh's major third)
+PASSING = {'7': 11, '7sus4': 11, 'sus4': 11, '': 8, 'maj7': 8, '6': 8, 'm6': 8, 'mMaj7': 8, 'm': 4, 'm7': 4}
 CHART_FORCE = 10.0   # logit taken from a pitch outside the chord's scale over a chart: its bass's, and at the default
                      # `out_of_key` its line's
 BASS_TOP = 52    # over a chart, under E3 it is a bass: the chord's root, its fifth and its other tones only
@@ -188,13 +192,26 @@ class Listener:
 
     def palette(self, now, name):
         """Over a chart: for each pitch class, 1 if a soloist playing `name` plays it over the chord at `now`.
-        'bebop': anything (the session weighs the notes); 'scale': the chord's scale; 'arpeggio': the chord; 'pentatonic': the pentatonic on the chord's root; 'blues'
-        and 'major_pentatonic': the blues scale and the major pentatonic of the tune's key, whatever the chord."""
+        'bebop': anything (the session weighs the notes); 'scale': the chord's scale; 'bebop_scale': that scale and
+        its passing tone (PASSING); 'arpeggio': the chord up to its ninth, as its scale has it; 'extensions': its third
+        and seventh with its tensions over them (9, 11 or #11, 13: an upper structure); 'pentatonic': the pentatonic
+        on the chord's root; 'blues' and 'major_pentatonic': the blues scale and the major pentatonic of the tune's
+        key, whatever the chord."""
         root, kind, tones = self.harmony(now)
         tonic = self.chart[1] % 12 if self.chart[1] is not None else root
-        if name == 'arpeggio':
-            steps, root = (), root
-        elif name == 'pentatonic' and kind not in ('dim', 'dim7', '+', '7#5'):
+        if name in ('arpeggio', 'extensions', 'bebop_scale'):
+            scale = self.chord_scale(now)
+            if name == 'bebop_scale':
+                if kind in PASSING:
+                    scale[(root + PASSING[kind]) % 12] = 1
+                return scale
+            if name == 'arpeggio':
+                ninth = next(((root + step) % 12 for step in (2, 1) if scale[(root + step) % 12]), root)
+                steps = [(pc - root) % 12 for pc in tones | {ninth}]
+            else:   # the third and the seventh (a triad: its third), and the tensions its scale has
+                steps = list(CHORDS[kind][1:4:2]) + [step for step in TENSIONS[kind] if scale[(root + step) % 12]]
+            return np.array([(pc - root) % 12 in steps for pc in range(12)], float)
+        if name == 'pentatonic' and kind not in ('dim', 'dim7', '+', '7#5'):
             steps = (0, 3, 5, 6, 10) if kind == 'm7b5' else NAMED['minor_pentatonic'] if kind.startswith('m') and \
                 kind != 'maj7' else NAMED['major_pentatonic']
         elif name in ('blues', 'major_pentatonic'):
@@ -213,13 +230,16 @@ class Listener:
         over a chord tone: they clash with it whatever the key) and the pitches outside the scale of the chord of
         the bar; under BASS_TOP, a bass: the chord's tones only, its root most of all."""
         root, kind, chord = self.harmony(now)
-        in_key = self.palette(now, palette)
+        in_key = palette if isinstance(palette, np.ndarray) else self.palette(now, palette)   # or the notes given
+        palette = None if isinstance(palette, np.ndarray) else palette
         colours = ({(root + step) % 12 for step in TENSIONS[kind]} - chord) & set(np.flatnonzero(in_key))
         bass = np.array([p < BASS_TOP for p in range(128)])
         tonic = np.array([p % 12 == root for p in range(128)]) + 0.5 * np.array(
             [p % 12 == (root + 7) % 12 and p % 12 in chord for p in range(128)])
         low = bass * (ROOT * tonic - CHART_FORCE * np.array([p % 12 not in chord for p in range(128)]))
         avoid = set() if palette == 'bebop' else {(tone + 1) % 12 for tone in chord} - chord - colours
+        if palette == 'bebop_scale' and kind in PASSING:   # its passing tone is no clash: it passes, off the beat
+            avoid.discard((root + PASSING[kind]) % 12)
         # over its bass as firmly as `out_of_key` says, from none (outside) to more than twice CHART_FORCE (inside);
         # its bass keeps to it
         force = np.where(bass, CHART_FORCE, CHART_FORCE * out_of_key / 2)

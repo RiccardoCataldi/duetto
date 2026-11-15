@@ -28,6 +28,19 @@ How any Tune is played: **Swing** (swung eighths, a walking bass), **Bossa** (ev
 **Even 8ths** (even eighths, a walking bass). Yours to choose, as in iReal Pro: a Tune never says its own.
 _Avoid_: genre, feel, groove (that is a Character control)
 
+**Voicing**:
+The notes it comps a chord with: rootless, of four notes, in the inversion nearest the last one played; its
+**shell** (third and seventh) while you play.
+_Avoid_: chord shape, inversion (a Voicing has two)
+
+**Way**:
+How it plays the changes for two bars when it quotes no Lick: a bebop line, a bebop scale, an arpeggio up to the
+ninth, the chord's extensions, its scale, a pentatonic or the blues.
+_Avoid_: mode, device, pattern
+
+**Guide tone**:
+The third or the seventh of a chord: where its solo lands on the beat the chord begins.
+
 **Voice**:
 One of the three things the model plays, each on its own MIDI channel and instrument: its **solo** (its line, or a
 Lick it quotes), its **chords** (what it comps, under you or under its own solo) and its **bass**.
@@ -46,8 +59,8 @@ _Avoid_: transport bar
 ### Shaping it
 
 **Character**:
-The nine musical controls (density, harmony, role, dialogue, groove, risk, focus, memory, key follow), each a
-musical intent.
+The ten musical controls (density, harmony, role, dialogue, groove, risk, focus, memory, key follow, vocabulary),
+each a musical intent.
 _Avoid_: macro (in the UI), musical controls
 
 **Knob**:

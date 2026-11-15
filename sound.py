@@ -41,7 +41,12 @@ SOUND = {
     'delay': (350, 350, 50, 1000, 'ms', "the time between its echoes"),
     'echo': (0.0, 0.0, 0.0, 1.0, 'level', "how loud the first echo is (0: no delay)"),
     'feedback': (0.4, 0.4, 0.0, 0.85, 'level', "how much each echo keeps of the one before"),
+    'melodic': (0, 0, 0, 1, 'choice:off/on', "one note at a time, as a flute or a horn plays: each note stops the one "
+                "before, and of notes struck together only the highest sounds"),
+    'pedal': (0, 0, 0, 1, 'choice:off/on', "a sustain pedal: each chord rings on until the next is struck, for a "
+              "fuller sound under a ballad"),
 }
+MELODIC_VOICES = (AI, CHORDS)        # the voices these two are a choice for: its bass plays one note at a time anyway
 # where its chords and its bass differ from its solo: a piano a little behind it, a double bass in the middle
 THEIRS = {CHORDS: {'volume': 90, 'pan': 76}, BASS: {'instrument': 32, 'volume': 115, 'pan': 64, 'reverb': 30}}
 # bands: name, the instruments of its solo, its chords and its bass

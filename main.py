@@ -27,6 +27,9 @@ KEYS = 'duetto keys'     # our MIDI port for the laptop's keyboard (pianoroll.py
 PLUG_S = 1.0             # how often we look whether your keyboard was unplugged or plugged back in
 RING = 1.6               # its notes ring this much longer than the model wrote them, as if with a light pedal
 RING_S = 0.4             # and at least this many seconds more
+MELODIC_S = 0.5          # how often we look whether you made a voice melodic, or gave it a pedal (sound.py)
+PEDAL_S = 4.0            # with its pedal, a chord rings on until the next, and this long at most
+CHORD_S = 0.08           # notes this close are struck together: one chord
 # its dynamics, shaped as a pianist shapes them; it follows how loud you play (LEVEL: how much your last note counts)
 LEVEL = 0.3
 QUIETEST = 80            # the softest it follows you down to: some keyboards never send more than 70
@@ -68,8 +71,10 @@ class Duo:
     `send` takes one protocol line (see music_transformer/server.py); `started` is when the connection opened.
     """
 
-    def __init__(self, send, midi_rec, started, rng=random):
+    def __init__(self, send, midi_rec, started, rng=random, sound_file=sound.SOUND_FILE):
         self.send = send
+        self.sound_file = sound_file   # where the piano roll keeps the sound: which voices are melodic
+        self.melodic, self.pedals, self.checked, self.stamp = set(), set(), float('-inf'), False
         self.midi_rec = midi_rec
         self.started = started
         self.rng = rng
@@ -86,7 +91,6 @@ class Duo:
         self.pending = []              # the model's notes not started yet: (onset, duration, pitch, voice)
         self.sounding = {}             # (channel, pitch) -> (onset, offset, velocity) of the model's notes: each of
                                        # its voices (solo, chords, bass) on its own channel, its own instrument
-        self.bass = None               # the pitch its walking bass sounds: one at a time
         self.line = deque(maxlen=CONTOUR_NOTES)   # its solo's last pitches
         self.late = 0                  # the model's notes that came later than LATE_S, skipped
         self.bpm, self.metronome = 0, False   # the tempo the model keeps to and whether we click it
@@ -156,24 +160,45 @@ class Duo:
             due = [n for n in self.pending if n[0] <= now]
             self.pending = [n for n in self.pending if n[0] > now]
             accompanying = self.played_at is not None and now - self.played_at < 1.0
+            melodic, pedals = self._melodic(now), self.pedals
             for onset, duration, pitch, hand in sorted(due, key=lambda n: n[:3]):
                 if now - onset > LATE_S:
                     self.late += 1
                     continue
                 channel = sound.VOICES[hand]
-                if (channel, pitch) in self.sounding:
-                    self._release((channel, pitch), now)
                 together = [n[2] for n in due if n[0] == onset and n[3] == hand]
+                # its bass, as a double bass, and a melodic voice, as a flute: one note at a time, the highest of
+                # those struck together; each stops the one before, and none rings on as with a pedal
+                one = hand == 'bass' or channel in melodic
+                if one and pitch != max(together):
+                    continue
+                # with its pedal the chord before rings until this one is struck: then the pedal is changed
+                pedal = channel in pedals and not one
+                for key, (struck, *_) in list(self.sounding.items()):
+                    if key[0] == channel and (one or key[1] == pitch or pedal and struck < now - CHORD_S):
+                        self._release(key, now)
                 velocity = dynamics(pitch, hand, together, self.line, self.level, accompanying, self.rng)
                 if hand == 'solo':
                     self.line.append(pitch)
-                ring = max(duration * RING, duration + RING_S)
-                if hand == 'bass':   # a double bass: each note stops the one before, and no pedal
-                    if (channel, self.bass) in self.sounding:
-                        self._release((channel, self.bass), now)
-                    self.bass, ring = pitch, duration
+                ring = duration if one else max(duration * RING, duration + RING_S, PEDAL_S if pedal else 0)
                 self.midi_rec.play_midi_message([0x90, pitch, velocity], is_generated=True, channel=channel)
                 self.sounding[(channel, pitch)] = (now, now + ring, velocity)
+
+    def _melodic(self, now):
+        """The channels of its voices that play one note at a time (sound.py's `melodic`), as the piano roll's knobs
+        left them in the sound file: read again, every MELODIC_S, when it has changed; and, in `pedals`, those that
+        have their sustain pedal down (`pedal`)."""
+        if now >= self.checked:
+            self.checked = now + MELODIC_S
+            try:
+                stamp = os.path.getmtime(self.sound_file)
+            except OSError:
+                stamp = None
+            if stamp != self.stamp:
+                self.stamp, values = stamp, sound.load(self.sound_file)
+                self.melodic = {player for player in sound.MELODIC_VOICES if values[player]['melodic']}
+                self.pedals = {player for player in sound.MELODIC_VOICES if values[player]['pedal']}
+        return self.melodic
 
     def _click(self, now):
         """Clicks the beat that is due: the model's beats fall on k * 60 / bpm seconds after the connection opened."""

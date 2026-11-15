@@ -39,8 +39,10 @@ And its **Part**:
 | Part | It plays |
 | --- | --- |
 | **Comps** | a walking bass and chords on each chord's scale, for you to solo |
-| **Solos** | a bebop line over the changes, for you to comp, quoting the great soloists (the `licks` knob) |
+| **Solos** | a line over the changes, for you to comp: a soloist's mixture of bebop lines, bebop scales, arpeggios up to the ninth, the chord's extensions, and phrases of the great soloists (*vocabulary*: how many) |
 | **Duet** | comps while you play, solos when you rest |
+
+Its chords are a jazz pianist's **voicings**: rootless, of four notes (3 5 7 9 or 7 9 3 5, a dominant with its 13th), the hand moving as little as it can from one chord to the next; while you play, the third and the seventh alone. Soloing, where a chord begins it lands on a **guide tone**, its third or its seventh. All of it leans on the model's choice of notes and never replaces it: the model still says when, how many and how long.
 
 It also quotes **you**: each phrase you play is filed under its chords and comes back wherever those chords return, in any key (*memory*: how often; *dialogue*: how much it prefers your last one). Between two phrases it quotes it may add a pickup into the next (the `pickup` knob). A phrase it quotes is a whole one, from where its soloist began it, upbeat and all, to where they ended it; its line waits for it, it begins near where the line left off, and its notes on the beat are fitted to the tune's chords. Now and then it plays the last one again to develop it: over the next chords, a beat later, its first half or upside down (the `vary` knob). Its solo builds over each chorus: eighths, short phrases and low at first, faster, longer and higher three quarters through (the `arc` knob). Hold a chord that is not the tune's and it follows your reharmonisation (*key follow*: how soon).
 
@@ -55,7 +57,7 @@ The model's other knobs (`KNOBS` in [duo.py](music_transformer/duo.py)) keep the
 
 The **Band** puts each Voice of the model on an instrument of its own: its **solo**, its **chords** and its **bass**. Pick a preset (piano trio, vibes, two pianos) or an instrument for each; the piano roll shows each in its colour. Only the sound changes: the model plays the same notes.
 
-The **Character** is nine controls: density, harmony, role, dialogue, groove, risk, focus, memory, key follow. Hover one to read what it does.
+The **Character** is ten controls: density, harmony, role, dialogue, groove, risk, focus, memory, key follow, vocabulary. Hover one to read what it does.
 
 Keys: `Space` play/stop the tune, `M` the metronome, `F` (or `F11`) fullscreen, `K` (or `Tab`) hide the panel, `Esc` quit.
 

@@ -3,6 +3,8 @@ Call-and-response generation with the Anticipatory Music Transformer (Stanford C
 https://github.com/jthickstun/anticipation
 """
 
+import os
+
 import torch
 from transformers import AutoModelForCausalLM
 from anticipation import ops
@@ -14,6 +16,20 @@ from anticipation.sample import safe_logits, future_logits, nucleus
 from music_transformer.graphed import GraphedGPT2
 
 
+def forget(folder):
+    """Lets go of the page cache of the model's files in `folder`, once its weights are on the device: on a Jetson,
+    where the GPU shares the RAM, three gigabytes of cached weights leave it too little to allocate from."""
+    if not os.path.isdir(folder) or not hasattr(os, 'posix_fadvise'):
+        return
+    for name in os.listdir(folder):
+        try:
+            fd = os.open(os.path.join(folder, name), os.O_RDONLY)
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+            os.close(fd)
+        except OSError:
+            pass
+
+
 class AMTGenerator:
     def __init__(self, model_name=None, device=None):
         self.device = device or ('cuda' if torch.cuda.is_available()
@@ -22,6 +38,7 @@ class AMTGenerator:
                                     else 'stanford-crfm/music-small-800k')
         dtype = torch.float16 if self.device == 'cuda' else torch.float32
         self.model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=dtype).to(self.device).eval()
+        forget(model_name)
         if self.device == 'cuda':
             self.model = GraphedGPT2(self.model)   # the same model, a note about three times sooner
 

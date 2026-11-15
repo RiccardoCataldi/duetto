@@ -114,6 +114,32 @@ class DuoSessionTest(unittest.TestCase):
             self.clock.t += 0.2
             self.assertGreater(len([n for n in self.fill() if n]), 0, turned)
 
+    def test_it_comps_rootless_voicings_and_a_shell_while_you_play(self):
+        self.session.turn(chart=self.tune('autumn_leaves'), part=0, playing=1, chord=4, skips=0)   # Cm7 | F7 | Bbmaj7 | Ebmaj7
+        self.session.begin()
+        chords = []
+        for _ in range(75):                                       # the first three bars and a half
+            self.clock.t += 0.1
+            chords += [n for n in self.fill() if n[3] == 'chords']
+        bars = {bar: {n[2] % 12 for n in chords if bar * 2 <= n[0] < bar * 2 + 2} for bar in range(3)}
+        self.assertTrue(bars[0] and bars[0] <= {3, 7, 10, 2}, bars)   # Cm7: Eb G Bb D, and no C: the bass has it
+        self.assertTrue(bars[1] and bars[1] <= {9, 2, 3, 7}, bars)    # F7: A D Eb G, its 13th for its fifth
+        self.assertTrue(bars[2] and bars[2] <= {2, 5, 9, 0}, bars)    # Bbmaj7: D F A C
+        self.session.hear(self.clock.t, 0.3, 84)                  # you play: its third and seventh are enough
+        at = self.session._tick(self.clock.t + 0.2)
+        shell = self.session._partner(at, [], duo.COMP, True)
+        self.assertEqual({int(p) % 12 for p in shell.argsort(descending=True)[:2]}, {7, 2})   # Ebmaj7: G and D
+
+    def test_soloing_it_lands_on_a_guide_tone_where_a_chord_begins(self):
+        self.session.turn(chart=self.tune('autumn_leaves'), part=2, playing=1, licks=0)   # Cm7 | F7: a bar is 2 s
+        self.session.begin()
+        line = [(0, NOTE_OFFSET + 4 * MAX_PITCH + 70)]            # its line is on Bb4, Cm7's seventh
+        guide = self.session._guide(2.0, line)                    # F7 begins
+        self.assertEqual(int(guide.argmax()), 69)                 # it falls to A4, F7's third
+        self.assertGreater(float(guide[75]), 0)                   # its seventh Eb is one too
+        self.assertEqual(float(guide[77]), 0)                     # its root is none
+        self.assertEqual(float(self.session._guide(3.0, line).max()), 0)   # F7 goes on: none
+
     def test_each_note_says_its_voice_solo_chords_or_bass(self):
         self.session.turn(chart=self.tune('blues_in_f'), part=0, playing=1)   # it comps
         self.session.begin()
@@ -148,7 +174,9 @@ class DuoSessionTest(unittest.TestCase):
         second = self.session._partner(self.session._tick(beat), [(0, NOTE_OFFSET + 32 * MAX_PITCH + 41)], (36, 51), False)
         self.assertIn(int(second[36:52].argmax()) + 36, (39, 45))             # a chord tone near F: Eb or A
         hands = self.session._hands(False)
-        self.assertEqual((hands[1][1] > 45, hands[1][2], hands[1][3][1]), (True, 1, 51))   # a note a beat, low
+        self.assertEqual((hands[1][1] >= 10, hands[1][2], hands[1][3][1]), (True, 1, 51))   # a note at a time, low:
+        self.session.turn(skips=0)                                                           # down to a skip note's
+        self.assertGreater(self.session._hands(False)[1][1], 45)                             # eighth; a beat without
 
     def test_over_a_tune_key_follow_says_how_soon_it_leaves_the_tunes_chord_for_the_one_you_hold(self):
         self.session.turn(chart=self.tune('blues_in_f'), playing=1, part=0)   # F7 | Bb7 | F7: a beat is 0.545 s
@@ -171,7 +199,7 @@ class DuoSessionTest(unittest.TestCase):
 
     def test_over_a_tune_its_bass_plays_every_beat_while_its_right_hand_plays_and_breathes(self):
         session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1, part=0,
-                             phrase=4, breath=200)           # 120 bpm: a beat is 0.5 s
+                             phrase=4, breath=200, skips=0)  # 120 bpm: a beat is 0.5 s; quarters only
         session.hear(0.0, 0.3, 60)
         notes = []
         for _ in range(80):
@@ -183,6 +211,26 @@ class DuoSessionTest(unittest.TestCase):
         self.assertGreater(len(bass), 12)
         self.assertTrue(all(abs(n[0] * 2 - round(n[0] * 2)) < 0.07 for n in notes if n[3] == 'bass'))
         self.assertGreater(sum(n[3] != 'bass' for n in notes), 5)
+
+    def test_now_and_then_its_walking_bass_plays_a_skip_note_an_eighth_on_the_swung_and_of_a_beat(self):
+        places = {}
+        for skips in (0.0, 0.3):
+            clock = Clock()
+            session = DuoSession(UniformModel(), 'cpu', clock=clock, chart=self.tune('autumn_leaves'), playing=1,
+                                 part=0, skips=skips)                # 120 bpm, swung: a beat is 0.5 s
+            session.hear(0.0, 0.3, 60)
+            notes = []
+            for _ in range(160):
+                clock.t += 0.1
+                while session.ahead() < duo.LOOKAHEAD:
+                    notes.append(session.play())
+            bass = [n[0] / 0.5 for n in notes if n[3] == 'bass']   # in beats
+            places[skips] = [round(b % 1 * 3) % 3 for b in bass]    # which third of its beat
+            beats = sorted({round(b) for b in bass if round(b % 1 * 3) % 3 == 0})
+            self.assertEqual(beats, list(range(beats[0], beats[-1] + 1)), skips)   # still a note on every beat
+        self.assertEqual(set(places[0.0]), {0})                      # quarters only
+        self.assertEqual(set(places[0.3]), {0, 2})                   # and now and then the and, on its last third
+        self.assertTrue(0.1 < places[0.3].count(2) / places[0.3].count(0) < 0.5, places[0.3])
 
     def test_over_a_bossa_its_bass_plays_root_and_fifth_on_one_the_and_of_two_three_and_the_and_of_four(self):
         session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('black_orpheus'), playing=1, part=0,
@@ -604,7 +652,7 @@ class DuoSessionTest(unittest.TestCase):
         second = list(zip((16.5, 16.75, 17.0, 17.25, 17.5, 17.75), (76, 72, 69, 66, 64, 62)))  # over Am7 | D7
         for part, recall in ((0, duo.EXACT), (2, duo.EXACT), (2, 0)):   # it comps, it solos
             clock = Clock()
-            session = DuoSession(UniformModel(), 'cpu', clock=clock, chart=tune, playing=1, bpm=240, part=part, licks=1,
+            session = DuoSession(UniformModel(), 'cpu', clock=clock, chart=tune, playing=1, bpm=240, part=part, licks=1, skips=0,
                                  recall=recall, echo=6, vary=0, max_rest=50)   # (no long rest: it is there as a phrase begins)
             yours, notes, whose = first + second, [], set()
             while clock.t < 27.9:

@@ -47,7 +47,8 @@ MIND_FILE = os.path.expanduser('~/.config/ai-duet/knobs.json')
 # the middle is the duo's default
 MACROS = [
     ('density', ('sparse', 'dense'), "how many notes it plays",
-     {'min_step': (60, 20, 8), 'max_rest': (500, 200, 100), 'phrase': (6, 16, 40), 'breath': (300, 150, 50)}),
+     {'min_step': (60, 20, 8), 'max_rest': (500, 200, 100), 'phrase': (6, 16, 40), 'breath': (300, 150, 50),
+      'skips': (0.0, 0.12, 0.3)}),
     ('harmony', ('inside', 'outside'), "how far it strays from the scale of the bar's chord, and how it colours the chord",
      {'out_of_key': (5.0, 2.0, 0.0), 'chord_tone': (3.0, 1.0, 0.0), 'tension': (0.0, 1.0, 3.0)}),
     ('role', ('accompanies', 'leads'), "while you play: it keeps apart from your hands and under your melody, or goes "
@@ -65,7 +66,12 @@ MACROS = [
      {'recall': (0.0, 4.0, 10.0)}),
     ('key follow', ('steady', 'quick'), "how soon it leaves the tune's chord for one you hold",
      {'stay': (0.995, 0.97, 0.85)}),
+    ('vocabulary', ('its own lines', 'quotes'), "how much of its solo is its own lines (arpeggios, bebop scales, "
+                                                "guide tones) and how much phrases it quotes, note for note",
+     {'licks': (0.0, 0.4, 0.8)}),
 ]
+# the model's knobs the panel turns one by one; the others follow a musical control, or keep the duo's default
+PLAYED = ('chart', 'part', 'style', 'bpm', 'metronome', 'lowest', 'highest')
 # the Parts over the Tune: name, the value of the knob `part`, what it plays
 PARTS = [('comps', 0, "it comps, with a walking bass, for you to solo"),
          ('duet', 1, "it comps while you play and solos when you rest"),
@@ -166,6 +172,12 @@ class Mind:
         self.turns = {label: turns for label, _, _, turns in MACROS}
         for macro in self.macros:
             macro.value = self._saved('macros').get(macro.name, 0.5)
+        # a knob kept from when the panel could turn each on its own (Advanced, which is gone) and that nothing here
+        # turns any more, or whose control you never moved, is let go: it would stay where it was for good
+        for name in list(self._saved('knobs')):
+            control = next((label for label, turns in self.turns.items() if name in turns), None)
+            if name not in PLAYED and (control is None or control not in self._saved('macros')):
+                del self.saved['knobs'][name]
         if address:
             threading.Thread(target=self._connect, daemon=True).start()
 
@@ -290,6 +302,8 @@ def sound_knobs(engine, player, who, accent):
     """The knobs of `player`'s sound in `engine`, by name: `who` it is names its instrument, and all are its colour."""
     knobs = {}
     for name, (*_, low, high, unit, what) in sound.SOUND.items():
+        if name in ('melodic', 'pedal') and player not in sound.MELODIC_VOICES:
+            continue
         default = sound.defaults()[player][name]
         knobs[name] = Knob(name, engine.sound[player][name], low, high, default, unit, what, isinstance(default, int),
                            lambda knob: engine.set(player, knob.name, knob.value),

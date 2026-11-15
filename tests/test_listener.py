@@ -130,14 +130,43 @@ class PaletteTest(unittest.TestCase):
         listener = Listener()
         listener.chart = (lambda now: (10, '7'), 5)   # Bb7 in a blues in F
         ways = {name: sorted(np.flatnonzero(listener.palette(0.0, name))) for name in
-                ('scale', 'arpeggio', 'pentatonic', 'blues', 'major_pentatonic')}
+                ('scale', 'arpeggio', 'extensions', 'bebop_scale', 'pentatonic', 'blues', 'major_pentatonic')}
         self.assertEqual(ways['scale'], [0, 2, 3, 5, 7, 8, 10])           # Bb mixolydian
-        self.assertEqual(ways['arpeggio'], [2, 5, 8, 10])
+        self.assertEqual(ways['arpeggio'], [0, 2, 5, 8, 10])              # Bb D F Ab, and up to its ninth C
+        self.assertEqual(ways['extensions'], [0, 2, 7, 8])                # its third and seventh under its 9th and 13th
+        self.assertEqual(ways['bebop_scale'], [0, 2, 3, 5, 7, 8, 9, 10])  # mixolydian and its passing A
         self.assertEqual(ways['pentatonic'], [0, 2, 5, 7, 8, 10])         # Bb major pentatonic, and the chord's Ab
         self.assertEqual(ways['blues'], [0, 3, 5, 8, 10, 11])             # F blues, whatever the chord
         self.assertEqual(ways['major_pentatonic'], [0, 2, 5, 7, 9])       # F major pentatonic
         self.assertLess(listener.bias(0.0, 1.0, 1.0, 2.0, 'blues')[62], -8)   # D4 is not in F blues
         self.assertGreater(listener.bias(0.0, 1.0, 1.0, 2.0, 'blues')[68], -1)       # Ab4 is, and is Bb7's seventh
+
+
+class VoicingTest(unittest.TestCase):
+    def test_a_ii_v_i_is_comped_rootless_and_the_hand_hardly_moves(self):
+        from music_transformer.voicings import distance, voicing
+        major = np.array([pc in (0, 2, 4, 5, 7, 9, 11) for pc in range(12)], float)   # C major, for all three
+        two = voicing(2, 'm7', major, 53, 76)
+        self.assertEqual(two, (60, 64, 65, 69))                        # Dm9 from its seventh: C E F A
+        five = voicing(7, '7', major, 53, 76, two)
+        self.assertEqual(five, (59, 64, 65, 69))                       # G13 from its third: B E F A, one note moved
+        one = voicing(0, 'maj7', major, 53, 76, five)
+        self.assertEqual(one, (59, 62, 64, 67))                        # Cmaj9 from its seventh: B D E G
+        self.assertLessEqual(distance(one, five), 8)
+        for chord, root in ((two, 2), (five, 7), (one, 0)):
+            self.assertNotIn(root, {pitch % 12 for pitch in chord})    # the bass has the root
+
+    def test_tensions_follow_the_chords_scale_and_a_shell_is_third_and_seventh(self):
+        from music_transformer.voicings import voicing
+        g_minor = np.array([(pc - 2) % 12 in (0, 1, 4, 5, 7, 8, 10) for pc in range(12)], float)   # D7 to G minor
+        altered = voicing(2, '7', g_minor, 53, 76)
+        self.assertEqual({pitch % 12 for pitch in altered}, {6, 10, 0, 3})   # F# Bb C Eb: its b13 and its b9
+        self.assertEqual({pitch % 12 for pitch in voicing(2, '7', g_minor, 53, 76, shell=True)}, {6, 0})
+        c_major = np.array([pc in (0, 2, 4, 5, 7, 9, 11) for pc in range(12)], float)
+        self.assertNotIn(6, {pitch % 12 for pitch in voicing(4, 'm7', c_major, 53, 76)})   # Em7 in C: no F#
+        again = voicing(2, '7', g_minor, 53, 76, altered, other=True)
+        self.assertNotEqual(again, altered)                            # the chord goes on: its other inversion
+        self.assertEqual(voicing(2, '7', g_minor, 60, 62), ())         # no room
 
 
 class AvoidTest(unittest.TestCase):

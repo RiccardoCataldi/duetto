@@ -94,8 +94,9 @@ def bar_at(session, seconds):
 
 
 PHRASE = 2 * BEATS   # beats a soloist keeps to one way of playing the changes: two bars
-# the ways, as often as each is here, when it does not quote a great soloist (the duo's `licks` knob, licks.py)
-WAYS = ('bebop',) * 4 + ('scale', 'arpeggio', 'pentatonic', 'blues')
+# the ways, as often as each is here, when it does not quote a great soloist (the duo's `licks` knob, licks.py): a
+# soloist's mixture of bebop lines, bebop scales, arpeggios up to the ninth and of the chord's extensions, scales
+WAYS = ('bebop',) * 3 + ('bebop_scale',) * 2 + ('arpeggio',) * 2 + ('extensions', 'scale', 'pentatonic', 'blues')
 
 
 def beats(session, seconds):

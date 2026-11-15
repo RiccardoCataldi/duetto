@@ -16,8 +16,8 @@ from anticipation.config import CONTEXT_SIZE, MAX_DUR, MAX_PITCH, MAX_TIME, TIME
 from anticipation.vocab import AUTOREGRESS, DUR_OFFSET, NOTE_OFFSET, TIME_OFFSET
 from anticipation.sample import safe_logits, nucleus
 
-from music_transformer import bebop, chart, licks
-from music_transformer.listener import BASS_TOP, CHART_FORCE, ROOT, STAY, Listener, hands
+from music_transformer import bebop, chart, licks, voicings
+from music_transformer.listener import BASS_TOP, CHART_FORCE, CHORDS, PASSING, ROOT, STAY, Listener, hands
 from music_transformer.listener import PHRASE as REST   # beats of rest that end your phrase
 
 LOOKAHEAD = 100   # ticks the model plays ahead of now (1 s)
@@ -72,12 +72,23 @@ COMP = (53, 76)   # where its chords are when it comps: from F3 to E5
 BASS = (28, BASS_TOP - 1)   # and its walking bass: from E1
 UNDER = (52, 69)  # the chords it comps under its own solo: from E3 to A4, as a pianist's left hand
 STAB = 3          # their notes
+VOICING = 6.0     # logit added to the notes of the voicing it comps a chord with (voicings.py): rootless, the hand
+                  # moving as little as it can from the last; a shell while you play. The model still says when, how
+                  # many of its notes and how long
+GUIDE = 1.0       # logit added, soloing, to the third and the seventh of a chord on the beat it begins: the guide
+                  # tones; twice as much to the one a step from where its line is (a seventh falls to the next third)
+# the ways that play few notes (an arpeggio, a pentatonic...) lean on them, and no more: the model keeps the whole
+# scale of the chord to choose from, and the notes of the way are only more likely
+NARROW = ('arpeggio', 'extensions', 'pentatonic', 'blues', 'major_pentatonic')
+PREFER = 1.5      # logit added to the notes of such a way
+PASSING_ON = 2.0  # logit taken, in a bebop scale, from its passing tone on the beat
 LATE = 6          # ticks: a note of a phrase it quotes may be this late and still be played
 FASTEST = 0.08    # seconds: a soloist's phrase with two notes closer than this at the tune's tempo is not quoted
 DETACHED = 0.8    # a note of a phrase it quotes lasts this much of the time to the next, at most: a horn's legato
                   # line, on a piano, would sound its notes one over the other
 WALK = 4.0        # logit added to the root where its walking bass begins a bar or a chord
 BOSSA = (0, 1.5, 2, 3.5)   # beats of the bar its bass plays on over a bossa: 1, the and of 2, 3, the and of 4
+SKIPS = 0.12      # how often its walking bass plays a skip note, an eighth on the and of a beat
 LEGATO = 0.9      # how often its bass over a bossa holds a note until the next; the others last three quarters as
                   # long. Walking, it holds every note until the next: a bass line is legato
 EARLY = 0.15      # beats before a bar line your phrase may begin and still begin at it: you rushed, it is no upbeat
@@ -123,6 +134,8 @@ KNOBS = {
     'vary': (0.3, 0.0, 1.0, '', "how often, in place of a new phrase, it plays the one it quoted last, or your last, "
              "again over the chords that follow, as a soloist develops a phrase: as it was, a beat later, its first "
              "half only, or upside down"),
+    'skips': (SKIPS, 0.0, 0.5, '', "how often its walking bass plays an eighth on the and of a beat, a skip note "
+              "into the next, as a bassist does now and then: 0, quarters only"),
     'arc': (0.6, 0.0, 1.0, '', "how much its solo builds over a chorus (three of a blues): from eighths, short phrases "
             "and the low of its register up to faster runs, longer and higher, three quarters through, and down "
             "again; 0: the same all through"),
@@ -165,6 +178,7 @@ class DuoSession:
         self.yours = {}                # your Licks, for this duo only: the phrases you played over each run of
                                        # chords (licks.key_of), as licks.DATA's, your last one last
         self.learned = -1.0            # session seconds of your last note in a phrase that has ended
+        self.voiced = None             # the voicing it comps with: ((root, kind, shell, register, two bars), pitches)
 
     def turn(self, **knobs):
         """Sets knobs (see KNOBS), kept within their range; they take effect from the model's next note."""
@@ -464,7 +478,8 @@ class DuoSession:
         right = (self.me, self.min_step, 1, within(SOLO[0] + round(rise * built), SOLO[1] - round(rise * (1 - built)))) \
             if solos else \
             (self.me, self.min_step, max(self.chord, 3), within(COMP[0], COMP[1]))
-        beat = 60 / self.pace * TIME_RESOLUTION * (0.5 if self._bossa() else 1)   # the least between its notes
+        # the least between its notes: a beat, half of one over a bossa, or with skip notes the and of the beat
+        beat = 60 / self.pace * TIME_RESOLUTION * (0.5 if self._bossa() else self._and() if self.skips else 1)
         beat = max(round(beat) - self.grid - 1, 5)
         return [right] + ([(self.left, beat, 1, BASS)] if self._walks() else [])   # its octaves bound its right hand only
 
@@ -503,12 +518,21 @@ class DuoSession:
         if way == 'bebop':
             chord_tone = 0   # what it plays over the chord comes from the soloists' habits instead (_bebop)
         bias = torch.tensor(self.listener.bias(at, chord_tone, 0 if way == 'bebop' else self.tension, self.out_of_key,
-                                               way)[:MAX_PITCH], dtype=torch.float) \
+                                               self._allowed(at, way))[:MAX_PITCH], dtype=torch.float) \
             + self._register(tick, you_play, register, right)
+        if way in NARROW:   # its notes a little more likely
+            bias += PREFER * torch.tensor(self.listener.palette(at, way), dtype=torch.float)[PITCHES.long() % 12]
         if not right and not comps:
             bias += self._walk(at, line)
+        if comps or (right and not solos):   # the hand that comps: a pianist's voicing, a shell while you play
+            bias += self._voicing(at, register, you_play and not comps)
         if solos:
             bias += self._bebop(at) if way == 'bebop' else self._approach(at, line, way)
+            bias += self._guide(at, line)
+            if way == 'bebop_scale' and abs(chart.beats(self, at) % 1 - 0.5) >= 0.35:   # on the beat: no passing tone
+                root, kind, _ = self.listener.harmony(at)
+                if kind in PASSING:
+                    bias[(PITCHES % 12 == (root + PASSING[kind]) % 12)] -= PASSING_ON
             if line and tick - line[-1][0] < 2 * 60 / self.pace * TIME_RESOLUTION:   # its line goes on: mostly by step
                 bias += LINE * torch.tensor(bebop.moves((line[-1][1] - NOTE_OFFSET) % MAX_PITCH)[:MAX_PITCH],
                                             dtype=torch.float)
@@ -523,6 +547,42 @@ class DuoSession:
                 if 0 <= echo < MAX_PITCH:
                     bias[echo] += self.echo
         return bias.to(self.device)
+
+    def _voicing(self, at, register, shell):
+        """Logits added to the pitches of the hand that comps, for the voicing of the chord at session seconds `at`
+        within its `register` (voicings.py): the one nearest the last it played, a `shell` while you play; over a
+        chord that goes on, its other inversion every two bars."""
+        root, kind, _ = self.listener.harmony(at)
+        key = (root, kind, shell, tuple(register), int(chart.beats(self, at) // (2 * chart.BEATS)))
+        if self.voiced is None or self.voiced[0] != key:
+            before = self.voiced[1] if self.voiced else ()
+            goes_on = self.voiced is not None and self.voiced[0][:4] == key[:4]
+            self.voiced = (key, voicings.voicing(root, kind, self.listener.chord_scale(at), *register, before, shell,
+                                                 goes_on))
+        bias = torch.zeros(MAX_PITCH)
+        bias[[pitch for pitch in self.voiced[1] if pitch < MAX_PITCH]] = VOICING
+        return bias
+
+    def _allowed(self, at, way):
+        """The notes its line may play at `at` playing the changes in `way` (listener.palette): those of the way; for
+        a way of few notes (NARROW), the chord's whole scale too, and theirs (a blue note) as well."""
+        if way not in NARROW:
+            return way
+        return np.maximum(self.listener.chord_scale(at), self.listener.palette(at, way))
+
+    def _guide(self, at, line):
+        """Logits added to its pitches when it solos, for the guide tones: on the beat a chord begins, its third and
+        its seventh, and most of all the one a step from its line's last note."""
+        bias, beat = torch.zeros(MAX_PITCH), chart.beats(self, at)
+        root, kind, _ = self.listener.harmony(at)
+        if abs(beat - round(beat)) >= 0.15 or self.listener.harmony(at - 60 / self.pace)[:2] == (root, kind):
+            return bias
+        guides = {(root + step) % 12 for step in CHORDS[kind][1:4:2]}
+        last = (line[-1][1] - NOTE_OFFSET) % MAX_PITCH if line else None
+        for pitch in range(BASS_TOP, MAX_PITCH):
+            if pitch % 12 in guides:
+                bias[pitch] = GUIDE * (2 if last is not None and 0 < abs(pitch - last) <= 2 else 1)
+        return bias
 
     def _lick(self, earliest, solos=True):
         """The next note of the phrase it quotes, (tick, pitch, ticks it lasts), or None. At each bar it comes to
@@ -693,9 +753,19 @@ class DuoSession:
         figure = BOSSA if self._bossa() else range(chart.BEATS)
         bar = math.floor((earliest - origin - self.grid) / beat / chart.BEATS)
         for at in (k * chart.BEATS + step for k in (bar, bar + 1, bar + 2) for step in figure):
-            tick = round(origin + at * beat)
-            if tick >= earliest - self.grid and played < tick - self.grid:   # a place that has no note yet
-                return tick
+            for spot in (at, at + 1 - self._and()) if not self._bossa() and self._skip(at) else (at,):
+                tick = round(origin + spot * beat)
+                if tick >= earliest - self.grid and played < tick - self.grid:   # a place that has no note yet
+                    return tick
+
+    def _and(self):
+        """The share of a beat from the and of the beat to the next: a third swung, otherwise a half."""
+        return 1 / 3 if chart.swung(self) else 0.5
+
+    def _skip(self, at):
+        """Whether its walking bass plays a skip note on the and of the beat `at` beats into the tune: as often as
+        `skips` says, by chance, the same beat after beat however often it is asked."""
+        return random.Random(self.varied * 41 + 3 + round(at)).random() < self.skips
 
     def _walk(self, at, line):
         """Logits added to its left hand's pitches, a walking bass: the root when the bar or the chord
@@ -703,7 +773,13 @@ class DuoSession:
         step."""
         bias, beat, low = torch.zeros(MAX_PITCH), 60 / self.pace, PITCHES < BASS_TOP
         here, before, coming = (self.listener.harmony(t)[:2] for t in (at, at - beat, at + beat))
-        if here != before or int(chart.beats(self, at) + 0.1) % chart.BEATS == 0:
+        place = chart.beats(self, at)
+        if abs(place - round(place)) > 0.1:   # a skip note, off the beat: it leads into the next, a semitone from
+            after = self.listener.harmony(self.began + math.ceil(place) * beat)[:2]   # its root when the chord changes
+            if after != here:
+                for step in (-1, 1):
+                    bias[(PITCHES % 12 == (after[0] + step) % 12) & low] += CHART_FORCE + WALK / 2
+        elif here != before or int(place + 0.1) % chart.BEATS == 0:
             bias[(PITCHES % 12 == here[0]) & low] += WALK
         else:   # it walks on from the root: the listener's liking for it is taken back
             bias[(PITCHES % 12 == here[0]) & low] -= ROOT
@@ -733,7 +809,8 @@ class DuoSession:
         semitone from a tone of the chord may be played though it is outside the scale; the note after it is that
         tone; and on the beat the chord's tones are its targets."""
         bias = torch.zeros(MAX_PITCH)
-        tones, scale = self.listener.harmony(at)[2], self.listener.palette(at, way)
+        tones, scale = self.listener.harmony(at)[2], self.listener.palette(at, way) if way not in NARROW \
+            else self._allowed(at, way)
         chord = torch.tensor([p % 12 in tones for p in range(MAX_PITCH)])
         last = (line[-1][1] - NOTE_OFFSET) % MAX_PITCH if line else None
         if last is not None and not scale[last % 12] and last % 12 not in tones:   # it approached: now it lands

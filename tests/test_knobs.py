@@ -45,6 +45,15 @@ class MindTest(unittest.TestCase):
         self.assertEqual((again.saved['knobs']['apart'], again.saved['knobs']['lead']), (4.0, 0.0))
         self.assertEqual(next(m for m in again.macros if m.name == 'role').value, 0.0)
 
+    def test_a_knob_kept_that_no_control_turns_any_more_is_let_go(self):
+        import json
+        with open(self.path, 'w') as f:   # as Advanced left them: licks nearly all quotes, vocabulary never moved
+            json.dump({'knobs': {'licks': 0.99, 'arc': 0.1, 'chart': 3, 'min_step': 10, 'apart': 1.0},
+                       'macros': {'density': 0.8}}, f)
+        again = knobs.Mind(None, self.path)
+        self.assertEqual(again.saved['knobs'], {'chart': 3, 'min_step': 10})   # the tune, and density's knob
+        self.assertEqual(next(m for m in again.macros if m.name == 'vocabulary').value, 0.5)
+
     def test_a_knob_you_never_turned_starts_where_its_control_stands(self):
         self.macro('role').set(1.0)                 # leads
         again = knobs.Mind(None, self.path)
