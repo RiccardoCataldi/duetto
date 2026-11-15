@@ -5,3 +5,7 @@ Cm7 | F7 | Bbmaj7 | Ebmaj7 | Am7b5 | D7 | Gm6 | % |
 Cm7 | F7 | Bbmaj7 | Ebmaj7 | Am7b5 | D7 | Gm6 | % |
 Am7b5 | D7 | Gm6 | % | Cm7 | F7 | Bbmaj7 | Ebmaj7 |
 Am7b5 | D7 | Gm7 C7 | Fm7 Bb7 | Ebmaj7 | Am7b5 D7 | Gm6 | % |
+> Eb5:4 | -:1 F4:1 G4:1 A4:1 | D5:2 D5:2 | -:1 Eb4:1 F4:1 G4:1 | C5:4 | -:1 D4:1 E4:1 Gb4:1 | Bb4:4 | r:1 G4:1 A4:1 Bb4:1 |
+> Eb5:4 | -:1 F4:1 G4:1 A4:1 | D5:2 D5:2 | -:1 Eb4:1 F4:1 G4:1 | C5:4 | -:1 A4:1 C5:1 Bb4:1 | G4:4 | -:1 r:1 Gb4:1 G4:1 |
+> A4:1 D4:1 A4:2 | -:1 A4:1 G4:1 A4:1 | Bb4:4 | -:1 Bb4:1 A4:1 Bb4:1 | C5:4 | -:1 F4:1 F5:1 Eb5:1 | D5:4 | -:1 r:1 Db5:1 D5:1 |
+> Eb5:1 Eb5:1 C5:1 C5:1 | A4:3 Eb5:1 | D5:2 D5:2 | -:3 G4:1 | C5:3 Bb4:1 | A4:2 Bb4:1 D4:1 | G4:4 | r:1 G4:1 A4:1 Bb4:1 |

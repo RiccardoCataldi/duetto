@@ -358,11 +358,14 @@ class DuoSession:
         if walks and left and len(hands) == 2:
             due = self._bass_due(earliest, left[1][-1][0] if left[1] else -MAX_TIME)
             if due + self.grid + 1 < MAX_TIME:
-                left[3][:] = -float('inf')   # on the beat, and only there
+                # on the beat, and only there, however loose its `grid`: a bass keeps the time. Not early: it hears
+                # the chord of the beat; late only when the beat has gone by before it could be sampled
+                beat = max(due, earliest)
+                left[3][:] = -float('inf')
                 if not quote or quote[0] >= due:   # a note it quotes before the beat comes first
-                    left[3][max(due, earliest):due + self.grid + 1] = 0   # not early: it hears the chord of the beat
+                    left[3][beat] = 0
                 for *_, window in hands:
-                    window[due + self.grid + 1:] = -float('inf')
+                    window[beat + 1:] = -float('inf')
             else:
                 due = None
         # soloing over its walking bass it comps a chord now and then, as a pianist's left hand does under the line
@@ -392,8 +395,8 @@ class DuoSession:
                                          0 if quote else feel)
                 if comp and not late:   # its chord has its own place in the bar, whatever the line's rhythm
                     mask[TIME_OFFSET + stab[0]:TIME_OFFSET + stab[1] + 1] = 0
-                if due is not None and not late and torch.isfinite(left[3][due + self.grid]):   # so has its bass,
-                    mask[TIME_OFFSET + max(due, earliest):TIME_OFFSET + due + self.grid + 1] = 0   # off the beat too
+                if due is not None and not late and torch.isfinite(left[3][beat]):   # so has its bass,
+                    mask[TIME_OFFSET + beat] = 0                                       # off the beat too
             elif slot == 1 and comp and bool(torch.isfinite(comp[3][self.seq[-1] - TIME_OFFSET])):   # a short chord,
                 beat = round(60 / self.pace * TIME_RESOLUTION)                                         # held over a ballad
                 shortest, longest = (beat, 3 * beat) if chart.ballad(self) else (min(10, beat // 2), beat + beat // 2)

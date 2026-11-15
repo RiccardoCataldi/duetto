@@ -58,6 +58,8 @@ class DuoSessionTest(unittest.TestCase):
         random.seed(0)
         self.clock, self.model = Clock(), UniformModel()
         self.enterContext(unittest.mock.patch('music_transformer.chart.COUNT', 0))   # charts begin at once here
+        # no tune's theme unless a test asks for it: these are its other ways of soloing
+        self.enterContext(unittest.mock.patch.dict(duo.KNOBS, {'theme': (0.0, *duo.KNOBS['theme'][1:])}))
         self.session = DuoSession(self.model, 'cpu', clock=self.clock, chart=self.tune('autumn_leaves'), playing=1)
         # a duet over Autumn Leaves, playing: 120 bpm, a bar is 2 s; it waits for your first note
 
