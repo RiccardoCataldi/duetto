@@ -80,7 +80,7 @@ PARTS = [('comps', 0, "it comps, with a walking bass, for you to solo"),
 STYLES = [('swing', "swung eighths over a walking bass"),
           ('bossa', "even eighths over a bossa's bass: root and fifth on 1, the and of 2, 3, the and of 4"),
           ('even 8ths', "even eighths over a walking bass"),
-          ('ballad', "swung eighths and triplets over a bass in two, long chords, phrases no faster than triplets")]
+          ('ballad', "phrases sung legato with silence between them, over a bass in two and long chords")]
 SLOWEST = 40              # bpm the player's tempo goes down to
 PIANOS = range(8)         # the General MIDI pianos: a bass on one plays no skip notes, a bassist's eighths
 LIGHTS_H = 12             # the player's beat lights

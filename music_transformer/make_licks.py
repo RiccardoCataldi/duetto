@@ -9,7 +9,8 @@ its soloist began a phrase and ends where they ended one (the database's phrases
 Each note is (beats from the first bar line, beats it lasts, semitones above the pitch class of the first chord's
 root), so that it is played in any key; a phrase that begins in the last UPBEAT beats of a bar and goes on is the
 next bar's, and those notes are its upbeat, before the bar line. Licks are filed under their chords: each one's kind
-(bebop.DEGREES'), its root in semitones above the first one's, and the beats it lasts.
+(bebop.DEGREES'), its root in semitones above the first one's, and the beats it lasts. Each is kept with its player,
+the tune and the tempo it was played at: over a ballad the duo quotes the slow ones first.
 """
 import collections
 import gzip
@@ -29,6 +30,7 @@ SPAN = 19        # a lick of one or two bars wider than this many semitones is l
 WIDE = 24        # and one of three or four bars wider than this
 LONGEST = 4      # bars of the longest licks
 UPBEAT = 2       # beats before a bar line from which a phrase that goes on past it is an upbeat to the next bar
+HELD = 4         # beats a note lasts at most: a phrase's last note, held, is kept as long as that
 
 
 def chord(name):
@@ -55,14 +57,14 @@ def key_of(chords):
 
 
 def licks(db):
-    solos = db.execute(f"select melid, performer, title from solo_info where signature = '4/4' and style in {STYLES}")
-    for melid, performer, title in solos.fetchall():
+    solos = db.execute(f"select melid, performer, title, avgtempo from solo_info where signature = '4/4' and style in {STYLES}")
+    for melid, performer, title, tempo in solos.fetchall():
         chords, last = {}, None
         for bar, beat, name in db.execute("select bar, beat, chord from beats where melid = ? order by onset", (melid,)):
             last = chord(name) or last
             if last:
                 chords[(bar, beat)] = last
-        notes = [(bar, beat - 1 + (tatum - 1) / max(division, 1), min(max(duration / beatdur, 0.1), 2), round(pitch))
+        notes = [(bar, beat - 1 + (tatum - 1) / max(division, 1), min(max(duration / beatdur, 0.1), HELD), round(pitch))
                  for bar, beat, tatum, division, pitch, duration, beatdur in db.execute(
                      "select bar, beat, tatum, division, pitch, duration, beatdur from melody where melid = ? "
                      "order by onset", (melid,))]
@@ -83,7 +85,7 @@ def licks(db):
                         or min(inner, default=2) < 2:   # no bar of it is silent
                     continue
                 low = min(pitches) - (min(pitches) - under[0][0]) % 12   # the root's pitch at or under its lowest note
-                yield key_of(under), (performer, title), [[round(at, 3), round(lasts, 2), pitch - low] for at, lasts, pitch in lick]
+                yield key_of(under), (performer, title, round(tempo or 0)), [[round(at, 3), round(lasts, 2), pitch - low] for at, lasts, pitch in lick]
 
 
 if __name__ == '__main__':

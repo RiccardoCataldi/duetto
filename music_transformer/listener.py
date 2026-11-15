@@ -39,6 +39,10 @@ CHORD_SCALES = {
 # played in eighths its chord tones fall on the beat (a dominant's major seventh, a major chord's sharp fifth, a
 # minor seventh's major third)
 PASSING = {'7': 11, '7sus4': 11, 'sus4': 11, '': 8, 'maj7': 8, '6': 8, 'm6': 8, 'mMaj7': 8, 'm': 4, 'm7': 4}
+ALTERED = (0, 1, 3, 4, 6, 8, 10)   # the altered scale, over a dominant that resolves: its b9, #9, b5 and b13 pull to the
+                                   # next chord (the same notes as the dominant a tritone away: its substitution)
+ALTERATIONS = (1, 3, 8)            # the tensions it colours such a dominant with: b9, #9, b13
+DIGITAL = {'min': (0, 2, 3, 7), 'maj': (0, 2, 4, 7)}   # Coltrane's cells, 1 2 3 5 over a chord, 1 2 b3 5 over a minor
 CHART_FORCE = 10.0   # logit taken from a pitch outside the chord's scale over a chart: its bass's, and at the default
                      # `out_of_key` its line's
 BASS_TOP = 52    # over a chart, under E3 it is a bass: the chord's root, its fifth and its other tones only
@@ -190,14 +194,29 @@ class Listener:
         scale[list(tones)] = 1
         return scale
 
+    def resolves(self, now):
+        """Over a chart: whether the chord at `now` is a dominant that resolves, the chord after it a fourth above
+        it (G7 to C, or to C minor), within two bars."""
+        root, kind, _ = self.harmony(now)
+        if kind not in ('7', '7#5') or not self.tempo:
+            return False
+        after = next((chord for chord in (self.chart[0](now + k * self.tempo) for k in range(1, 9))
+                      if tuple(chord) != (root, kind)), None)
+        return after is not None and after[0] == (root + 5) % 12
+
     def palette(self, now, name):
         """Over a chart: for each pitch class, 1 if a soloist playing `name` plays it over the chord at `now`.
         'bebop': anything (the session weighs the notes); 'scale': the chord's scale; 'bebop_scale': that scale and
         its passing tone (PASSING); 'arpeggio': the chord up to its ninth, as its scale has it; 'extensions': its third
         and seventh with its tensions over them (9, 11 or #11, 13: an upper structure); 'pentatonic': the pentatonic
         on the chord's root; 'blues' and 'major_pentatonic': the blues scale and the major pentatonic of the tune's
-        key, whatever the chord."""
+        key, whatever the chord; 'altered': over a dominant that resolves, the altered scale (elsewhere the chord's
+        own); 'digital': the cell 1 2 3 5 on the chord's root."""
         root, kind, tones = self.harmony(now)
+        if name == 'altered' and self.resolves(now):
+            scale = np.array([(pc - root) % 12 in ALTERED for pc in range(12)], float)
+            scale[list(tones)] = 1
+            return scale
         tonic = self.chart[1] % 12 if self.chart[1] is not None else root
         if name in ('arpeggio', 'extensions', 'bebop_scale'):
             scale = self.chord_scale(now)
@@ -214,6 +233,8 @@ class Listener:
         if name == 'pentatonic' and kind not in ('dim', 'dim7', '+', '7#5'):
             steps = (0, 3, 5, 6, 10) if kind == 'm7b5' else NAMED['minor_pentatonic'] if kind.startswith('m') and \
                 kind != 'maj7' else NAMED['major_pentatonic']
+        elif name == 'digital' and kind not in ('dim', 'dim7', '+', '7#5', 'm7b5'):
+            steps = DIGITAL['min' if kind.startswith('m') and kind != 'maj7' else 'maj']
         elif name in ('blues', 'major_pentatonic'):
             steps, root, tones = NAMED[name], tonic, ()
         elif name == 'bebop':   # any note: the session weighs them as bebop soloists do (bebop.py)
@@ -232,7 +253,8 @@ class Listener:
         root, kind, chord = self.harmony(now)
         in_key = palette if isinstance(palette, np.ndarray) else self.palette(now, palette)   # or the notes given
         palette = None if isinstance(palette, np.ndarray) else palette
-        colours = ({(root + step) % 12 for step in TENSIONS[kind]} - chord) & set(np.flatnonzero(in_key))
+        steps = ALTERATIONS if palette == 'altered' and self.resolves(now) else TENSIONS[kind]
+        colours = ({(root + step) % 12 for step in steps} - chord) & set(np.flatnonzero(in_key))
         bass = np.array([p < BASS_TOP for p in range(128)])
         tonic = np.array([p % 12 == root for p in range(128)]) + 0.5 * np.array(
             [p % 12 == (root + 7) % 12 and p % 12 in chord for p in range(128)])

@@ -39,6 +39,11 @@ LEFT_HAND = 0.85         # its left hand under its right
 TOP, INNER = 1.08, 0.82  # in a chord the top voice sings and the inner voices fall back
 CONTOUR = 0.2            # its line swells as it rises and falls back as it descends: this much from lowest to highest
 CONTOUR_NOTES = 16       # its last notes the contour is measured against
+# and its solo's phrases have a shape: they begin softly, their held notes fall away, the notes off the beat are lighter
+BEGINS = (0.88, 0.94)    # how loud the first and the second note of a phrase are, of what they would be
+PHRASE_BEATS = 1.5       # beats of silence before a note that make it a phrase's first
+HELD = 0.9               # a note a beat long or more, after the phrase's first: where it comes to rest
+GHOST = 0.92             # a note off the beat, shorter than a beat
 HUMAN = 4                # velocity a little different every time, as a hand never strikes twice the same
 # the metronome of the tune (the bpm and metronome knobs): General MIDI percussion, a bar of BAR beats
 DRUMS = 9
@@ -47,10 +52,12 @@ CLICK_VELOCITY = 70
 BAR = 4
 
 
-def dynamics(pitch, hand, together, line, level, accompanying, rng=random):
+def dynamics(pitch, hand, together, line, level, accompanying, rng=random, phrase=None):
     """The velocity of one of the model's notes, of its voice `hand` ('solo', 'chords' or 'bass'). `together`: the
     pitches that voice starts with it, `line`: its solo's last pitches, `level`: how loud you play, `accompanying`:
-    whether you are playing."""
+    whether you are playing. `phrase`, for a note of its solo: (the notes of its phrase before it, the beats it
+    lasts, how far into its beat it begins, from 0 to 1): a phrase begins softly, comes to rest on a held note that
+    falls away, and its notes off the beat are lighter."""
     velocity = max(level, QUIETEST) * SOFTER * (ACCOMPANY if accompanying else 1)
     if hand in ('left', 'bass'):
         velocity *= LEFT_HAND
@@ -59,6 +66,14 @@ def dynamics(pitch, hand, together, line, level, accompanying, rng=random):
     if hand == 'solo' and len(line) >= 4 and max(line) > min(line):
         height = min(max((pitch - min(line)) / (max(line) - min(line)), 0), 1)
         velocity *= 1 + CONTOUR * (height - 0.5)
+    if hand == 'solo' and phrase:
+        before, lasts, into = phrase
+        if before < len(BEGINS):
+            velocity *= BEGINS[before]
+        elif lasts >= 1:
+            velocity *= HELD
+        elif 0.2 < into < 0.9:
+            velocity *= GHOST
     velocity += rng.uniform(-HUMAN, HUMAN)
     return min(max(round(velocity), 1), 127)
 
@@ -92,6 +107,7 @@ class Duo:
         self.sounding = {}             # (channel, pitch) -> (onset, offset, velocity) of the model's notes: each of
                                        # its voices (solo, chords, bass) on its own channel, its own instrument
         self.line = deque(maxlen=CONTOUR_NOTES)   # its solo's last pitches
+        self.sung = (None, 0)          # when its solo's last note began, and the notes of its phrase so far
         self.late = 0                  # the model's notes that came later than LATE_S, skipped
         self.bpm, self.metronome = 0, False   # the tempo the model keeps to and whether we click it
         self.click_at = None           # when the metronome's next beat falls
@@ -177,7 +193,14 @@ class Duo:
                 for key, (struck, *_) in list(self.sounding.items()):
                     if key[0] == channel and (one or key[1] == pitch or pedal and struck < now - CHORD_S):
                         self._release(key, now)
-                velocity = dynamics(pitch, hand, together, self.line, self.level, accompanying, self.rng)
+                phrase = None
+                if hand == 'solo' and self.bpm:   # where the note is in its phrase and in its beat
+                    beat = 60 / self.bpm
+                    last, before = self.sung
+                    before = 0 if last is None or onset - last > PHRASE_BEATS * beat else before
+                    phrase = (before, duration / beat, (onset - self.bar_at) / beat % 1)
+                    self.sung = (onset, before + (onset != last))
+                velocity = dynamics(pitch, hand, together, self.line, self.level, accompanying, self.rng, phrase)
                 if hand == 'solo':
                     self.line.append(pitch)
                 ring = duration if one else max(duration * RING, duration + RING_S, PEDAL_S if pedal else 0)

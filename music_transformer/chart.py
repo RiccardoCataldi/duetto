@@ -5,12 +5,17 @@ A file in charts/ is a few `name: value` lines (title, key as "G minor", bpm) an
 more chords each, sharing the bar equally; `%` is the bar before again. Chords are spelt as in a Real Book or
 iReal Pro (Cm7, C-7, F7b9, C7#5, Bbmaj7, B^7, Am7b5, Aø, Gm6, C7/E...) and heard as the nearest of listener.CHORDS.
 A chart says nothing of how it is played: the Style is yours to choose, as in iReal Pro, whatever the tune.
+It may give the tune's theme too, its melody, for the duo to paraphrase when it solos: lines that begin with `>`, bar by
+bar between `|` as the chords are, each bar its notes in order, `pitch:beats` (`Bb4:1/2`, C4 being middle C), `r:beats`
+a rest and `-:beats` the note before held on, over the bar line too; a bar's beats add up to four. A pickup is written
+where it is played: at the end of the last bar.
 """
 import glob
 import math
 import os
 import random
 import re
+from fractions import Fraction
 
 from music_transformer.listener import CHORDS
 
@@ -65,8 +70,12 @@ class Chart:
     def __init__(self, path):
         self.name = os.path.splitext(os.path.basename(path))[0]
         self.title, self.bpm, self.key, self.bars = self.name.replace('_', ' '), 120, None, []
+        theme = []
         with open(path) as f:
             for line in f:
+                if line.startswith('>'):
+                    theme += [bar.split() for bar in line[1:].split('|') if bar.strip()]
+                    continue
                 head, _, value = line.partition(':')
                 if value and head.strip() in ('title', 'key', 'bpm'):
                     if head.strip() == 'title':
@@ -81,12 +90,64 @@ class Chart:
                     self.bars.append(self.bars[-1] if bar == ['%'] else [chord(name) + (name,) for name in bar])
         if not self.bars:
             raise ValueError(f"no bars in {path}")
+        self.theme = phrases(notes(theme, path), len(self.bars))
 
     def at(self, beats):
         """(bar from 0, (root, kind, name) there) at `beats` since the chart began; it goes round and round."""
         bar = int(beats // BEATS) % len(self.bars)
         chords = self.bars[bar]
         return bar, chords[int(beats % BEATS / BEATS * len(chords))]
+
+
+def notes(bars, path=''):
+    """The notes of a theme written bar by bar (see above): (beats from its first bar line, beats it lasts, pitch)."""
+    found = []
+    for bar, written in enumerate(bars):
+        at = Fraction(0)
+        for note in written:
+            name, _, lasts = note.partition(':')
+            lasts = Fraction(lasts or 1)
+            match = re.fullmatch(r'([A-G])([#b]?)(-?\d)', name)
+            if match:
+                letter, accidental, octave = match.groups()
+                pitch = ROOTS[letter] + {'#': 1, 'b': -1, '': 0}[accidental] + 12 * (int(octave) + 1)
+                found.append([float(bar * BEATS + at), float(lasts), pitch])
+            elif name == '-' and found:
+                found[-1][1] += float(lasts)
+            elif name != 'r':
+                raise ValueError(f"not a note: {note!r} in {path}")
+            at += lasts
+        if abs(at - BEATS) > 0.05:
+            raise ValueError(f"bar {bar + 1} of the theme in {path} lasts {float(at):g} beats")
+    return found
+
+
+UPBEAT = 2   # beats before a bar line from which a phrase of the theme that goes on past it is the next bar's (as a Lick's)
+WHOLE = 4    # bars a phrase of the theme lasts at most (licks.LONGEST)
+
+
+def phrases(theme, bars):
+    """The phrases of a `theme` (notes()) over a form of `bars` bars: {the bar one begins at: (the bars it lasts, its
+    notes as (beats from that bar line, beats it lasts, pitch))}. A phrase ends at a rest of half a beat or after a
+    note two beats long (the last of them, when one follows another), and before it would last more than WHOLE bars; one that begins in the last UPBEAT beats of a
+    bar and goes on is the next bar's, those notes its upbeat: so is a pickup at the end of the form the first bar's."""
+    end, pickup = bars * BEATS, []
+    while theme and theme[-1][0] >= end - UPBEAT and theme[-1][0] + theme[-1][1] > (pickup[0][0] + end if pickup else end) - 0.5:
+        pickup.insert(0, [theme[-1][0] - end, *theme[-1][1:]])
+        theme = theme[:-1]
+    theme, found, phrase = pickup + theme, {}, []
+    for k, note in enumerate(theme):
+        phrase.append(note)
+        ends = k + 1 == len(theme) or theme[k + 1][0] - (note[0] + note[1]) >= 0.5 or \
+            (note[1] >= 2 and note[0] >= 0 and theme[k + 1][1] < 2)
+        first = int(phrase[0][0] // BEATS)
+        first += phrase[0][0] % BEATS >= BEATS - UPBEAT and (not ends or phrase[-1][0] >= (first + 1) * BEATS)
+        if ends or int(theme[k + 1][0] // BEATS) - first >= WHOLE:
+            if len(phrase) >= 2:
+                found[first % bars] = (max(int(phrase[-1][0] // BEATS) - first + 1, 1),
+                                       [(at - first * BEATS, lasts, pitch) for at, lasts, pitch in phrase])
+            phrase = []
+    return found
 
 
 CHANGES = 1.5   # over a chart it leans on the chord of the bar this much at least: it plays the changes
@@ -103,7 +164,12 @@ def bar_at(session, seconds):
 PHRASE = 2 * BEATS   # beats a soloist keeps to one way of playing the changes: two bars
 # the ways, as often as each is here, when it does not quote a great soloist (the duo's `licks` knob, licks.py): a
 # soloist's mixture of bebop lines, bebop scales, arpeggios up to the ninth and of the chord's extensions, scales
-WAYS = ('bebop',) * 3 + ('bebop_scale',) * 2 + ('arpeggio',) * 2 + ('extensions', 'scale', 'pentatonic', 'blues')
+# over a dominant that resolves its altered scale; Coltrane's cells, 1 2 3 5
+WAYS = ('bebop',) * 3 + ('bebop_scale',) * 2 + ('arpeggio',) * 2 + ('extensions', 'scale', 'pentatonic', 'blues') \
+    + ('altered',) * 2 + ('digital',)
+# over a ballad: the chord's colours and its arpeggio, its scale, the altered dominant; no pentatonic, no blues
+BALLAD_WAYS = ('extensions',) * 3 + ('arpeggio',) * 2 + ('scale',) * 2 + ('altered',) * 3 + ('bebop_scale',) * 2 \
+    + ('bebop', 'digital')
 
 
 def beats(session, seconds):
@@ -117,8 +183,9 @@ HOLD = 0.5   # how often it keeps to its way for two bars more
 def way(session, seconds):
     """How it solos at `seconds`, one of listener.palette()'s: another, by chance, every two bars, or (HOLD) every
     four. In a major key the major pentatonic of the key is one more; the further its `out_of_key` is under its
-    default (2), the more often bebop and blues, the ways that leave the scale."""
-    ways = WAYS + (('major_pentatonic',) if (CHARTS[session.chart - 1].key or 0) < 12 else ()) \
+    default (2), the more often bebop and blues, the ways that leave the scale. Over a ballad, BALLAD_WAYS."""
+    ways = BALLAD_WAYS if ballad(session) else \
+        WAYS + (('major_pentatonic',) if (CHARTS[session.chart - 1].key or 0) < 12 else ()) \
         + ('bebop', 'blues') * round(max(2 - session.out_of_key, 0))
     phrase = beats(session, seconds) // PHRASE
     phrase -= phrase % 2 and random.Random(session.varied * 17 + phrase).random() < HOLD
@@ -162,7 +229,7 @@ def build(session, seconds):
 FEELS = (2, 2, 2, 3, 3, 4, 4, 8, 0)   # how it divides the beat, as often as each is here; 0: out of time
 BUSY = {2: 0, 3: 1, 4: 2, 8: 3}       # how busy each is; out of time is a step away, wherever its solo is
 BUSIEST = 2.5                         # as busy as its solo gets at its height: sixteenths, or thirty-seconds
-BALLAD = (2, 2, 3, 0)                 # over a ballad: eighths, triplets or out of time, however far it has built
+BALLAD = (2, 2, 3)                    # over a ballad, where it plans no phrase (duo._phrase): eighths or triplets
 
 
 def feel(session, seconds):

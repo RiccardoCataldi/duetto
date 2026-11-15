@@ -176,6 +176,16 @@ class DuoTest(unittest.TestCase):
         high = main.dynamics(72, 'solo', [72], line, 80, False, random.Random(0))
         self.assertGreater(high, low)
 
+    def test_a_phrase_of_its_solo_begins_softly_rests_on_a_held_note_and_is_lighter_off_the_beat(self):
+        line, loud = [60, 62, 64, 65, 67, 69, 71, 72], lambda phrase: main.dynamics(
+            65, 'solo', [65], line, 100, False, random.Random(0), phrase)
+        inside = loud((4, 0.5, 0.0))                             # its fifth note, an eighth on the beat
+        self.assertEqual(inside, main.dynamics(65, 'solo', [65], line, 100, False, random.Random(0)))
+        self.assertLess(loud((0, 0.5, 0.0)), loud((1, 0.5, 0.0)))   # it begins softly
+        self.assertLess(loud((1, 0.5, 0.0)), inside)
+        self.assertLess(loud((4, 2.0, 0.0)), inside)             # a held note falls away
+        self.assertLess(loud((4, 0.5, 0.67)), inside)            # off the beat: lighter
+
     def test_a_note_that_arrives_too_late_is_skipped(self):
         self.duo.receive("note 2.000 0.200 60\n")
         self.duo.tick(102.0 + main.LATE_S + 0.05)

@@ -33,7 +33,7 @@ Pick a tune in **Play** and its page appears. Choose its **Style**, whatever the
 | **Swing** | swung eighths over a walking bass |
 | **Bossa** | even eighths over a bossa's bass: root and fifth on 1, the and of 2, 3, the and of 4 |
 | **Even 8ths** | even eighths over a walking bass |
-| **Ballad** | swung eighths and triplets, never faster, over a bass in two (root on 1, fifth on 3, held); held chords under its solo, on one, three or pushing the next bar, varied bar by bar; only the soloists' phrases no faster than triplets |
+| **Ballad** | a solo planned phrase by phrase over a bass in two (root on 1, fifth on 3, held): each phrase a slow solo's Lick, the tune's theme paraphrased, or its own on a borrowed rhythm, going to a note chosen before it begins; sung legato, a little behind the beat, its last note held, silence after it, never faster than triplets; held chords under it, on one, three or pushing the next bar |
 
 And its **Part**:
 
@@ -74,6 +74,11 @@ Cm7 | F7 | Bbmaj7 | Ebmaj7 | Am7b5 | D7 | Gm6 | % |
 ```
 
 A chart holds no style: swing, bossa, even eighths or ballad is chosen in the panel.
+
+A chart may give the tune's theme too, for the solo to paraphrase (the `theme` knob): lines that begin with `>`, bar by
+bar as the chords, each note `pitch:beats`, `r:beats` a rest, `-:beats` the note before held on:
+
+    > F4:1 A4:1/2 C5:1/2 E5:2 | D5:1 B4:1 G4:2 | E4:4 | -:2 r:1 A4:1/2 C5:1/2
 
 ## How it works
 

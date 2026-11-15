@@ -25,8 +25,9 @@ _Avoid_: role (that is a Character control), preset
 
 **Style**:
 How any Tune is played: **Swing** (swung eighths, a walking bass), **Bossa** (even eighths, a bossa's bass),
-**Even 8ths** (even eighths, a walking bass) or **Ballad** (swung eighths and triplets, a bass in two, long chords, phrases
-no faster than triplets). Yours to choose, as in iReal Pro: a Tune never says its own.
+**Even 8ths** (even eighths, a walking bass) or **Ballad** (a bass in two, long chords, and a solo planned phrase by
+phrase: sung legato, laid back, its last note held, silence after it, nothing faster than triplets). Yours to choose,
+as in iReal Pro: a Tune never says its own.
 _Avoid_: genre, feel, groove (that is a Character control)
 
 **Voicing**:
@@ -36,11 +37,26 @@ _Avoid_: chord shape, inversion (a Voicing has two)
 
 **Way**:
 How it plays the changes for two bars when it quotes no Lick: a bebop line, a bebop scale, an arpeggio up to the
-ninth, the chord's extensions, its scale, a pentatonic or the blues.
+ninth, the chord's extensions, its scale, a pentatonic, the blues, the altered scale over a dominant that resolves, or
+Coltrane's cell (1 2 3 5). Over a Ballad: no pentatonic, no blues.
 _Avoid_: mode, device, pattern
 
 **Guide tone**:
 The third or the seventh of a chord: where its solo lands on the beat the chord begins.
+
+**Theme**:
+The melody of a Tune, written in its chart bar by bar (optional): what its solo paraphrases, phrase by phrase, as
+often as the `theme` Knob says.
+_Avoid_: head, melody (in the UI), lead sheet
+
+**Own phrase**:
+Over a Ballad, a phrase of its solo that is no Lick and no Theme: its rhythm borrowed from a soloist's, its notes its
+own, on their way to its Arrival.
+_Avoid_: line (that is its solo's notes in a row, whatever plays them), plan
+
+**Arrival**:
+The note an Own phrase ends on, chosen before it begins: a colour of the chord there (third, seventh, a tension).
+_Avoid_: target (that is a chord tone on the beat), goal
 
 **Voice**:
 One of the three things the model plays, each on its own MIDI channel and instrument: its **solo** (its line, or a

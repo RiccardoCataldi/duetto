@@ -344,6 +344,130 @@ class DuoSessionTest(unittest.TestCase):
             onsets = sorted({round(seconds, 3) for seconds, *_ in phrase})
             self.assertTrue(all(b - a > 1 / 3 - 0.02 for a, b in zip(onsets, onsets[1:])), onsets)
 
+    def ballad(self, bars=24, **knobs):
+        """The notes of its solo over Misty as a ballad at 60 bpm (a beat is 1 s), alone: (beats, beats it lasts,
+        pitch); and the session."""
+        session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=self.tune('misty'), playing=1, part=2,
+                             style=3, bpm=60, **knobs)
+        session.begin()
+        notes, end = [], self.clock.t + bars * 4
+        while self.clock.t < end:
+            self.clock.t += 0.1
+            while session.ahead() < duo.LOOKAHEAD:
+                notes.append(session.play())
+        return [(onset - session.began, lasts, pitch) for onset, lasts, pitch, voice in notes if voice == 'solo'], session
+
+    def test_over_a_ballad_its_solo_is_phrases_sung_legato_their_last_note_held_and_silence_after(self):
+        for licks_ in (0, 0.5):
+            solo, session = self.ballad(licks=licks_)
+            self.assertGreater(len(solo), 30)
+            gaps = [b[0] - a[0] for a, b in zip(solo, solo[1:])]
+            for (at, lasts, _), gap in zip(solo, gaps):
+                if gap <= duo.TIED:                              # legato: held until the next, never over it
+                    self.assertAlmostEqual(lasts, gap, delta=0.05)
+                else:                                            # a phrase's last: held, and then nothing
+                    self.assertGreaterEqual(lasts, duo.TIED - 0.05)
+            ends = [gap for gap in gaps if gap > duo.TIED]
+            self.assertGreater(len(ends), 5)                     # phrases, with room between them
+            self.assertGreater(max(ends), 4)                     # a bar of silence, now and then
+            for at, *_ in solo:                                  # in time: on a triplet or a sixteenth, laid back a little
+                self.assertLess(min((at - k / 12) % 1 for k in range(12) if k % 3 == 0 or k % 4 == 0),
+                                1 / 12 + duo.LAID_BACK + 0.03, at)
+
+    def test_over_a_ballad_a_phrase_of_its_own_borrows_a_rhythm_and_arrives_on_a_colour_of_the_chord(self):
+        solo, session = self.ballad(licks=0)
+        gaps = [b[0] - a[0] for a, b in zip(solo, solo[1:])]
+        arrivals = [note for note, gap in zip(solo, gaps) if gap > duo.TIED]
+        colours = [session.listener.palette(session.began + at + 0.01, 'extensions')[pitch % 12] for at, _, pitch in arrivals]
+        self.assertGreater(sum(colours), 0.9 * len(colours))     # a third, a seventh, a ninth: never a passing note
+        session.quotes, session.rested, session.vary = {}, 0, 0
+        session._plan(40, [], True)
+        own = session.quotes[40]
+        self.assertTrue(all(pitch is None for _, pitch, *_ in own[:-1]))   # its notes are its own, to find
+        self.assertIsNotNone(own[-1][1])                         # but where it is going is chosen
+        self.assertEqual([aim[1] for *_, aim, _ in own[:-1]], list(range(len(own) - 1, 0, -1)))
+        self.assertTrue(all(aim[0] == own[-1][1] for *_, aim, _ in own[:-1]))
+        toward = session._toward(session.began + 160, (72, 1), False)
+        self.assertEqual(int(toward.argmax()) in (70, 71, 73, 74), True)   # the note before it: a step from it
+        self.assertLess(float(session._toward(session.began + 160, (72, 2), False)[84]), -5)   # too far to walk back
+        session.vary, session.rested = 1, 0                      # its own motif: the same rhythm, on other notes
+        session._plan(44, [], True)
+        again = session.quotes[44]
+        self.assertEqual([round(a[0] - own[0][0] - 16 * (k > 0), 0) for k, a in enumerate(again[:1])], [16])
+        self.assertEqual(len(again), len(own))
+
+    def test_it_paraphrases_the_theme_of_a_tune_that_has_one_written(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'a_theme.txt')
+            with open(path, 'w') as f:
+                f.write("key: C major\nbpm: 60\n| Dm7 | G7 | Cmaj7 | % |\n"
+                        "> F4:1 A4:1/2 C5:1/2 E5:2 | D5:1 B4:1 G4:2 | E4:4 | -:2 r:1 A4:1/2 C5:1/2\n")
+            tune = chart.Chart(path)
+        self.assertEqual(tune.theme[0], (1, [(-1.0, 0.5, 69), (-0.5, 0.5, 72), (0.0, 1.0, 65), (1.0, 0.5, 69),
+                                             (1.5, 0.5, 72), (2.0, 2.0, 76)]))   # its pickup, from the form's end
+        self.assertEqual(tune.theme[1], (2, [(0.0, 1.0, 74), (1.0, 1.0, 71), (2.0, 2.0, 67), (4.0, 6.0, 64)]))
+        with self.assertRaises(ValueError):
+            chart.notes([['C4:2', 'D4:1']])                      # a bar of three beats
+        with unittest.mock.patch('music_transformer.chart.CHARTS', chart.CHARTS[:-1] + [tune]):   # in place of the last
+            session = DuoSession(UniformModel(), 'cpu', clock=self.clock, chart=len(chart.CHARTS), playing=1, part=2,
+                                 theme=1, licks=0, bpm=60)
+            session.begin()
+            for session.varied in range(12):
+                session.quotes = {}
+                session._plan(1, [], True)
+                phrase = session.quotes[1]
+                self.assertIs(session.quotes[2], phrase)         # the theme's two bars
+                given = [pitch for _, pitch, *_ in phrase if pitch is not None]
+                self.assertLessEqual({pitch % 12 for pitch in given}, {2, 11, 7, 4})   # its notes, in some octave
+                self.assertLessEqual({pitch % 12 for _, pitch, *_ in phrase if _ is None}, set())
+                self.assertEqual((phrase[0][1] % 12, phrase[-1][1] % 12), (2, 4))   # its first and last, always
+                self.assertTrue(all(duo.SOLO[0] <= pitch <= duo.SOLO[1] for pitch in given))
+            session.theme = 0
+            session.quotes = {}
+            session._plan(1, [], True)
+            self.assertEqual(session.quotes[1], [])              # theme at 0: never
+
+    def test_over_a_dominant_that_resolves_it_may_play_the_altered_scale_and_coltranes_cells_over_any_chord(self):
+        session, listener = self.session, self.session.listener   # Autumn Leaves: Cm7 | F7 | Bbmaj7 | Ebmaj7 | Am7b5 | D7 | Gm
+        self.assertTrue(listener.resolves(2.1))                  # F7 to Bb
+        self.assertFalse(listener.resolves(0.1))                 # Cm7 is no dominant
+        altered = listener.palette(2.1, 'altered')
+        self.assertEqual([pc for pc in range(12) if altered[pc]], [0, 1, 3, 5, 6, 8, 9, 11])   # F Gb Ab A B Db Eb, and its fifth
+        self.assertEqual(list(listener.palette(0.1, 'altered')), list(listener.chord_scale(0.1)))
+        bias = listener.bias(2.1, 1.5, 1.0, 2.0, 'altered')
+        self.assertGreater(bias[66], bias[67])                   # its b9 over its ninth
+        self.assertEqual([pc for pc in range(12) if listener.palette(0.1, 'digital')[pc]], [0, 2, 3, 7, 10])   # 1 2 b3 5
+        ways = {chart.way(session, at) for session.varied in range(40) for at in range(0, 64, 4)}
+        self.assertLessEqual({'altered', 'digital'}, ways)
+        session.turn(style=3)
+        ways = {chart.way(session, at) for session.varied in range(40) for at in range(0, 64, 4)}
+        self.assertFalse(ways & {'blues', 'pentatonic', 'major_pentatonic'})   # not over a ballad
+
+    def test_its_solo_may_say_a_run_twice_as_a_motif_and_never_a_third_time(self):
+        note = lambda pitch: NOTE_OFFSET + 4 * MAX_PITCH + pitch
+        line = [(k * 30, note(pitch)) for k, pitch in enumerate((60, 62, 64, 67, 60, 62))]
+        self.assertIn(note(64), self.session._banned(line, 200))             # comping: no run again
+        self.assertNotIn(note(64), self.session._banned(line, 200, True))    # soloing: once more
+        line = [(k * 30, note(pitch)) for k, pitch in enumerate((60, 62, 64, 67, 60, 62, 64, 65, 60, 62))]
+        self.assertIn(note(64), self.session._banned(line, 400, True))       # and no more
+
+    def test_over_a_ballad_it_quotes_a_slow_solos_phrase_first(self):
+        from music_transformer import licks
+        self.assertTrue(all(len(player) == 3 for player in licks.DATA['players']))   # who, the tune, its tempo
+        library = {'players': [['a horn', 'a ballad', 64], ['a horn', 'a burner', 240]], 'licks': {'min.0.4': [
+            [0, [[0, 1, 3], [1, 1, 5], [2, 1, 7], [3, 1, 10]]]] + [
+            [1, [[0, 1, 3], [1, 1, 5], [2, 1, 7], [3, 1, 10 + k]]] for k in range(1, 30)]}}
+        chords = [(0, 'm7')] * 16
+        slow = sum(licks.quote(library, random.Random(k), chords, 48, 96, 60, slow=True)[0] == 'a horn · a ballad'
+                   for k in range(60))
+        any_ = sum(licks.quote(library, random.Random(k), chords, 48, 96, 60)[0] == 'a horn · a ballad' for k in range(60))
+        self.assertGreater(slow, 40)                             # SAME of the time
+        self.assertLess(any_, 15)
+        self.assertGreater(len(licks.rhythms(duo.TRIPLET)), 300)
+        bars, rhythm = licks.rhythm(random.Random(0), 3.5, duo.TRIPLET, 0.5)
+        self.assertTrue(all(b[0] - a[0] > 0.3 for a, b in zip(rhythm, rhythm[1:])))
+
     def test_over_a_tune_its_right_hand_plays_on_though_the_model_would_rather_walk_its_bass_alone(self):
         class Bassist(UniformModel):
             def __call__(self, inp, past_key_values=None, use_cache=True):

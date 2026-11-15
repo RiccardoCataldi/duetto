@@ -6,6 +6,7 @@ Database, under the ODbL). The duo keeps yours in a library of the same form, an
 import functools
 import gzip
 import json
+import math
 import os
 
 import numpy as np
@@ -21,6 +22,58 @@ LONGER = 0.8   # how often it takes the phrase that fits the chords to come best
 SAME = 0.8     # how often, when the soloist it last quoted played over these chords too, it stays with them
 FEW = 6        # chords played by fewer soloists than this are quoted less often: it would say the same thing again
 DRAWN = 8      # phrases it draws over the chords, to take the one that goes on best from where its line is
+SLOW = 100     # bpm: a solo no faster than this is a ballad's; over a ballad its phrases are quoted first, and their
+SLOWER = 3     # rhythms borrowed this many times as often
+
+
+def tempo(library, lick):
+    """The tempo the solo of `lick` was played at, in bpm; 0 when the library does not say."""
+    player = library['players'][lick[0]]
+    return player[2] if len(player) > 2 else 0
+
+
+@functools.cache
+def rhythms(fastest):
+    """The rhythms of DATA's phrases with no two notes less than `fastest` beats apart, each once: (the bars it
+    lasts, ((beats from its first bar line, beats it lasts), ...), whether its solo was SLOW)."""
+    found = {}
+    for key, cells in DATA['licks'].items():
+        bars = sum(int(chord.split('.')[2]) for chord in key.split()) // 4
+        for lick in cells:
+            notes = tuple((at, lasts) for at, lasts, _ in lick[1])
+            if all(b[0] - a[0] > fastest - 1e-6 for a, b in zip(notes, notes[1:])):
+                found[notes] = (bars, notes, found.get(notes, (0, 0, False))[2] or 0 < tempo(DATA, lick) <= SLOW)
+    return sorted(found.values())
+
+
+def rhythm(rng, density, fastest, keep=1.0):
+    """A rhythm for a phrase of its own, borrowed from a soloist's: (the bars it lasts, [(beats from its first bar
+    line, beats it lasts), ...]). One of about `density` notes a bar, a ballad's rather than another's (SLOWER); of
+    its notes between the first and the last, `keep` stay, by chance: the fewer, the more room in it."""
+    pool = rhythms(fastest)
+    bars, notes, _ = rng.choices(pool, [math.exp(-abs(len(notes) / bars - density)) * (SLOWER if slow else 1)
+                                        for bars, notes, slow in pool])[0]
+    return bars, [note for k, note in enumerate(notes) if k in (0, len(notes) - 1) or rng.random() < keep]
+
+
+def settle(notes, low, high, near):
+    """`notes`, (beats, beats it lasts, pitch), of a phrase of a tune's theme, in the octave that keeps the most of
+    it from `low` to `high` and begins nearest the pitch `near`."""
+    shift = min(range(-36, 48, 12), key=lambda shift: (sum(not low <= pitch + shift <= high for *_, pitch in notes),
+                                                       abs(notes[0][2] + shift - near)))
+    return [(at, lasts, pitch + shift) for at, lasts, pitch in notes]
+
+
+def paraphrase(notes, rng):
+    """`notes` of a phrase of a tune's theme as a soloist states it: as it is written; the notes the ear rests on
+    only (a beat long or more, its first and its last); or those, and the others its own: their pitch None, for its
+    line to find on the way to the next of them."""
+    how, rests = rng.randrange(3), lambda k: notes[k][1] >= 1 or k in (0, len(notes) - 1)
+    if how == 1 and sum(map(rests, range(len(notes)))) >= 3:
+        return [note for k, note in enumerate(notes) if rests(k)]
+    if how == 2:
+        return [(at, lasts, pitch if rests(k) else None) for k, (at, lasts, pitch) in enumerate(notes)]
+    return list(notes)
 
 
 def pickup(last, target, room, scale, chromatic=True):
@@ -85,7 +138,7 @@ def vary(lick, bars, rng):
     return [[at, lasts, 2 * lick[0][2] - pitch if how == 3 else pitch] for at, lasts, pitch in lick]
 
 
-def quote(library, rng, chords, low, high, near, like=None, most=LONGEST, fastest=0):
+def quote(library, rng, chords, low, high, near, like=None, most=LONGEST, fastest=0, slow=False):
     """A phrase of `library` (DATA's form) to play over `chords`, the (root, kind in listener.CHORDS) of each beat
     of the bars to come: one played whole over the same chords from the first bar on, a fourth up or a tone down as
     they may be, `most` bars long at most. Of the lengths someone played over these chords (four bars of a
@@ -94,7 +147,7 @@ def quote(library, rng, chords, low, high, near, like=None, most=LONGEST, fastes
     `like` when there is one of theirs. Of DRAWN of them, drawn with `rng`, the one whose first note goes on best
     from the pitch `near`, the last of its line, in the octave that keeps it from `low` to `high` (place). A phrase
     with two notes less than `fastest` beats apart is left out: a horn's run from a slower tune, a blur at this one's
-    tempo.
+    tempo. `slow`: over a ballad, a phrase from a solo played as slowly (SLOW), when there is one, as often as SAME.
     Returns ("who · the tune", [(beats from the bar line, beats it lasts, pitch), ...], the bars it lasts), or None
     when nothing was played over these chords."""
     under = [(root, kind_of(kind)) for root, kind in chords]
@@ -118,10 +171,12 @@ def quote(library, rng, chords, low, high, near, like=None, most=LONGEST, fastes
     for _, bars in found[first:] + found[:first]:
         licks = played(0, -bars)
         theirs = [lick for lick in licks if library['players'][lick[0]][0] == like]
-        for pool in ([theirs] if theirs and rng.random() < SAME else []) + [licks]:
+        slower = [lick for lick in licks if 0 < tempo(library, lick) <= SLOW] if slow else []
+        for pool in ([slower] if slower and rng.random() < SAME else []) + \
+                ([theirs] if theirs and rng.random() < SAME else []) + [licks]:
             placed = [(place(lick, under[0][0], low, high, near), player)
                       for player, lick in rng.sample(pool, min(len(pool), DRAWN))]
             best = max((drawn for drawn in placed if drawn[0]), key=lambda drawn: drawn[0][0], default=None)
             if best:
-                return ' · '.join(library['players'][best[1]]), best[0][1], -bars
+                return ' · '.join(library['players'][best[1]][:2]), best[0][1], -bars
     return None
