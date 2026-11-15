@@ -64,10 +64,12 @@ def settle(notes, low, high, near):
     return [(at, lasts, pitch + shift) for at, lasts, pitch in notes]
 
 
-def paraphrase(notes, rng):
+def paraphrase(notes, rng, plain=False):
     """`notes` of a phrase of a tune's theme as a soloist states it: as it is written; the notes the ear rests on
     only (a beat long or more, its first and its last); or those, and the others its own: their pitch None, for its
-    line to find on the way to the next of them."""
+    line to find on the way to the next of them. `plain`: as it is written, always."""
+    if plain:
+        return list(notes)
     how, rests = rng.randrange(3), lambda k: notes[k][1] >= 1 or k in (0, len(notes) - 1)
     if how == 1 and sum(map(rests, range(len(notes)))) >= 3:
         return [note for k, note in enumerate(notes) if rests(k)]

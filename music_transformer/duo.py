@@ -151,7 +151,8 @@ KNOBS = {
     'skips': (SKIPS, 0.0, 0.5, '', "how often its walking bass plays an eighth on the and of a beat, a skip note "
               "into the next, as a bassist does now and then: 0, quarters only"),
     'theme': (0.3, 0.0, 1.0, '', "how often, where a phrase of the tune's theme begins, its solo paraphrases it: as "
-              "written, its long notes only, or those with its own between them; a tune with no theme written: never"),
+              "written, its long notes only, or those with its own between them; at the top it states the theme: all of "
+              "it as written, and nothing else; a tune with no theme written: never"),
     'arc': (0.6, 0.0, 1.0, '', "how much its solo builds over a chorus (three of a blues): from eighths, short phrases "
             "and the low of its register up to faster runs, longer and higher, three quarters through, and down "
             "again; 0: the same all through"),
@@ -628,7 +629,7 @@ class DuoSession:
         bar = int((chart.beats(self, at) + 0.5) // chart.BEATS)
         line = self._my_line()
         played = line[-1][0] if line else -1
-        planned = solos and chart.ballad(self)
+        planned = solos and (chart.ballad(self) or self.theme >= 1)   # stating the theme: it and nothing else
 
         def coming(bar):
             """The notes of the phrase of `bar` it has yet to play."""
@@ -688,11 +689,14 @@ class DuoSession:
             library, rng, chords, low, high, near, self.quoting and self.quoting[0].split(' · ')[0], ahead, fastest,
             ballad)
         rests = ballad and self.rested > bar * chart.BEATS + licks.UPBEAT
-        theme = solos and not rests and chance.random() < self.theme and tune.theme.get(bar % len(tune.bars))
+        states = solos and self.theme >= 1 and bool(tune.theme)   # the theme as written, and silence between its phrases
+        theme = solos and not rests and (states or chance.random() < self.theme) and tune.theme.get(bar % len(tune.bars))
         found, notes, bars = None, [], 1
         if theme:
-            bars, notes = theme[0], licks.paraphrase(licks.settle(theme[1], low, high, near), chance)
-        elif self.licks > 0 and owed and not rests:
+            # stating it: where it is written; paraphrasing it: where its line is
+            bars, notes = theme[0], licks.paraphrase(
+                licks.settle(theme[1], low, high, theme[1][0][2] if states else near), chance, states)
+        elif self.licks > 0 and owed and not rests and not states:
             if solos and self.motif and self.motif[2] <= ahead and rng.random() < self.vary:
                 placed = licks.place(licks.vary(*self.motif[1:], rng), chords[0][0], low, high, near)
                 found = placed and (self.motif[0], placed[1], self.motif[2])
@@ -710,7 +714,7 @@ class DuoSession:
             bars, notes = found[2], found[1]
             if 2 * self.out_of_key >= OUT_OF_KEY:   # inside: over these chords, not those it was played over
                 notes = licks.fit(notes, lambda at_: self.listener.chord_scale(start + (at_ + 0.01) * beat))
-        elif ballad and not rests and not theme:
+        elif ballad and not rests and not theme and not states:
             bars, notes = self._rhythm(start, chance)
         phrase = []
         if notes:

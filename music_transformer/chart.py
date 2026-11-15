@@ -122,7 +122,8 @@ def notes(bars, path=''):
     return found
 
 
-UPBEAT = 2   # beats before a bar line from which a phrase of the theme that goes on past it is the next bar's (as a Lick's)
+UPBEAT = 3   # beats before a bar line from which a phrase of the theme that goes on past it is the next bar's: a
+             # pickup of three quarters, as Autumn Leaves's
 WHOLE = 4    # bars a phrase of the theme lasts at most (licks.LONGEST)
 
 
@@ -143,7 +144,7 @@ def phrases(theme, bars):
         first = int(phrase[0][0] // BEATS)
         first += phrase[0][0] % BEATS >= BEATS - UPBEAT and (not ends or phrase[-1][0] >= (first + 1) * BEATS)
         if ends or int(theme[k + 1][0] // BEATS) - first >= WHOLE:
-            if len(phrase) >= 2:
+            if phrase:
                 found[first % bars] = (max(int(phrase[-1][0] // BEATS) - first + 1, 1),
                                        [(at - first * BEATS, lasts, pitch) for at, lasts, pitch in phrase])
             phrase = []
