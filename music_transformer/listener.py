@@ -43,6 +43,8 @@ ALTERED = (0, 1, 3, 4, 6, 8, 10)   # the altered scale, over a dominant that res
                                    # next chord (the same notes as the dominant a tritone away: its substitution)
 ALTERATIONS = (1, 3, 8)            # the tensions it colours such a dominant with: b9, #9, b13
 DIGITAL = {'min': (0, 2, 3, 7), 'maj': (0, 2, 4, 7)}   # Coltrane's cells, 1 2 3 5 over a chord, 1 2 b3 5 over a minor
+HALF_WHOLE = (0, 1, 3, 4, 6, 7, 9, 10)   # the diminished scale over a dominant, a semitone then a tone: a 7b9's
+DIMINISHED = (1, 3, 6, 9)                # and the tensions it colours it with: b9, #9, #11, 13
 CHART_FORCE = 10.0   # logit taken from a pitch outside the chord's scale over a chart: its bass's, and at the default
                      # `out_of_key` its line's
 BASS_TOP = 52    # over a chart, under E3 it is a bass: the chord's root, its fifth and its other tones only
@@ -211,10 +213,12 @@ class Listener:
         and seventh with its tensions over them (9, 11 or #11, 13: an upper structure); 'pentatonic': the pentatonic
         on the chord's root; 'blues' and 'major_pentatonic': the blues scale and the major pentatonic of the tune's
         key, whatever the chord; 'altered': over a dominant that resolves, the altered scale (elsewhere the chord's
-        own); 'digital': the cell 1 2 3 5 on the chord's root."""
+        own); 'diminished': over a dominant, the half-whole scale (elsewhere the chord's own); 'digital': the cell
+        1 2 3 5 on the chord's root; anything else ('scale', 'sideslip'): the chord's scale."""
         root, kind, tones = self.harmony(now)
-        if name == 'altered' and self.resolves(now):
-            scale = np.array([(pc - root) % 12 in ALTERED for pc in range(12)], float)
+        if name == 'altered' and self.resolves(now) or name == 'diminished' and kind == '7':
+            scale = np.array([(pc - root) % 12 in (ALTERED if name == 'altered' else HALF_WHOLE) for pc in range(12)],
+                             float)
             scale[list(tones)] = 1
             return scale
         tonic = self.chart[1] % 12 if self.chart[1] is not None else root
@@ -253,7 +257,8 @@ class Listener:
         root, kind, chord = self.harmony(now)
         in_key = palette if isinstance(palette, np.ndarray) else self.palette(now, palette)   # or the notes given
         palette = None if isinstance(palette, np.ndarray) else palette
-        steps = ALTERATIONS if palette == 'altered' and self.resolves(now) else TENSIONS[kind]
+        steps = ALTERATIONS if palette == 'altered' and self.resolves(now) else \
+            DIMINISHED if palette == 'diminished' and kind == '7' else TENSIONS[kind]
         colours = ({(root + step) % 12 for step in steps} - chord) & set(np.flatnonzero(in_key))
         bass = np.array([p < BASS_TOP for p in range(128)])
         tonic = np.array([p % 12 == root for p in range(128)]) + 0.5 * np.array(

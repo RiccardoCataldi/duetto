@@ -30,6 +30,7 @@ RING_S = 0.4             # and at least this many seconds more
 MELODIC_S = 0.5          # how often we look whether you made a voice melodic, or gave it a pedal (sound.py)
 PEDAL_S = 4.0            # with its pedal, a chord rings on until the next, and this long at most
 CHORD_S = 0.08           # notes this close are struck together: one chord
+CRUSHED_S = 0.05         # a note of its solo this short is a crushed one: let go at once, never rung on
 # its dynamics, shaped as a pianist shapes them; it follows how loud you play (LEVEL: how much your last note counts)
 LEVEL = 0.3
 QUIETEST = 80            # the softest it follows you down to: some keyboards never send more than 70
@@ -203,7 +204,8 @@ class Duo:
                 velocity = dynamics(pitch, hand, together, self.line, self.level, accompanying, self.rng, phrase)
                 if hand == 'solo':
                     self.line.append(pitch)
-                ring = duration if one else max(duration * RING, duration + RING_S, PEDAL_S if pedal else 0)
+                ring = duration if one or hand == 'solo' and duration <= CRUSHED_S else \
+                    max(duration * RING, duration + RING_S, PEDAL_S if pedal else 0)
                 self.midi_rec.play_midi_message([0x90, pitch, velocity], is_generated=True, channel=channel)
                 self.sounding[(channel, pitch)] = (now, now + ring, velocity)
 

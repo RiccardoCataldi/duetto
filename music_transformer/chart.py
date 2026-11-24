@@ -165,12 +165,15 @@ def bar_at(session, seconds):
 PHRASE = 2 * BEATS   # beats a soloist keeps to one way of playing the changes: two bars
 # the ways, as often as each is here, when it does not quote a great soloist (the duo's `licks` knob, licks.py): a
 # soloist's mixture of bebop lines, bebop scales, arpeggios up to the ninth and of the chord's extensions, scales
-# over a dominant that resolves its altered scale; Coltrane's cells, 1 2 3 5
+# over a dominant that resolves its altered scale; Coltrane's cells, 1 2 3 5; over a dominant the half-whole scale;
+# and slipping a semitone off the chord's scale before a bar line, to come back in on it
 WAYS = ('bebop',) * 3 + ('bebop_scale',) * 2 + ('arpeggio',) * 2 + ('extensions', 'scale', 'pentatonic', 'blues') \
-    + ('altered',) * 2 + ('digital',)
-# over a ballad: the chord's colours and its arpeggio, its scale, the altered dominant; no pentatonic, no blues
+    + ('altered',) * 2 + ('digital', 'diminished', 'sideslip')
+# over a ballad: the chord's colours and its arpeggio, its scale, the altered dominant; no pentatonic, no blues, no
+# slipping
 BALLAD_WAYS = ('extensions',) * 3 + ('arpeggio',) * 2 + ('scale',) * 2 + ('altered',) * 3 + ('bebop_scale',) * 2 \
-    + ('bebop', 'digital')
+    + ('bebop', 'digital', 'diminished')
+SLIP = 2   # beats before every other bar line that its line slips a semitone off the chord's scale ('sideslip')
 
 
 def beats(session, seconds):
@@ -184,13 +187,39 @@ HOLD = 0.5   # how often it keeps to its way for two bars more
 def way(session, seconds):
     """How it solos at `seconds`, one of listener.palette()'s: another, by chance, every two bars, or (HOLD) every
     four. In a major key the major pentatonic of the key is one more; the further its `out_of_key` is under its
-    default (2), the more often bebop and blues, the ways that leave the scale. Over a ballad, BALLAD_WAYS."""
+    default (2), the more often bebop and blues, the ways that leave the scale; over it, inside, it never slips off
+    the scale. Over a ballad, BALLAD_WAYS."""
     ways = BALLAD_WAYS if ballad(session) else \
         WAYS + (('major_pentatonic',) if (CHARTS[session.chart - 1].key or 0) < 12 else ()) \
         + ('bebop', 'blues') * round(max(2 - session.out_of_key, 0))
+    if session.out_of_key > 2:
+        ways = tuple(way for way in ways if way != 'sideslip')
     phrase = beats(session, seconds) // PHRASE
     phrase -= phrase % 2 and random.Random(session.varied * 17 + phrase).random() < HOLD
     return random.Random(session.varied + phrase).choice(ways)
+
+
+def slip(session, seconds):
+    """Side-slipping, the semitones its line slips off the chord's scale at `seconds`: up (1) or down (-1), by chance,
+    in the last SLIP beats of every two bars, to come back in on the bar line (a note out of the scale lands a
+    semitone from a chord tone: duo._approach); 0 elsewhere."""
+    at = beats(session, seconds)
+    if at % PHRASE < PHRASE - SLIP:
+        return 0
+    return random.Random(session.varied * 59 + 7 + at // PHRASE).choice((-1, 1))
+
+
+THICK = 0.6   # how often, at its solo's height and its `arc` at the top, two bars of it are in octaves or block chords
+
+
+def texture(session, seconds):
+    """How its right hand plays its solo at `seconds`: a 'line' of single notes, in 'octaves', or in 'block' chords
+    (duo._with): another, by chance, every two bars; thicker the nearer its solo is to its height (build), as much
+    as its `arc` says, THICK of the time at most."""
+    phrase = beats(session, seconds) // PHRASE
+    rng = random.Random(session.varied * 71 + 9 + phrase)
+    thick = THICK * session.arc * build(session, session.began + phrase * PHRASE * 60 / session.pace)
+    return rng.choice(('octaves', 'block')) if rng.random() < thick else 'line'
 
 
 # the beats of a bar on which it comps a chord under its own solo, as often as each is here: on one, on the "and" of

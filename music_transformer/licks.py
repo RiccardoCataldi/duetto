@@ -46,14 +46,25 @@ def rhythms(fastest):
     return sorted(found.values())
 
 
-def rhythm(rng, density, fastest, keep=1.0):
+def rhythm(rng, density, fastest, keep=1.0, ballad=True):
     """A rhythm for a phrase of its own, borrowed from a soloist's: (the bars it lasts, [(beats from its first bar
-    line, beats it lasts), ...]). One of about `density` notes a bar, a ballad's rather than another's (SLOWER); of
-    its notes between the first and the last, `keep` stay, by chance: the fewer, the more room in it."""
+    line, beats it lasts), ...]). One of about `density` notes a bar, over a `ballad` a ballad's rather than
+    another's (SLOWER); of its notes between the first and the last, `keep` stay, by chance: the fewer, the more room
+    in it."""
     pool = rhythms(fastest)
-    bars, notes, _ = rng.choices(pool, [math.exp(-abs(len(notes) / bars - density)) * (SLOWER if slow else 1)
+    bars, notes, _ = rng.choices(pool, [math.exp(-abs(len(notes) / bars - density)) * (SLOWER if slow and ballad else 1)
                                         for bars, notes, slow in pool])[0]
     return bars, [note for k, note in enumerate(notes) if k in (0, len(notes) - 1) or rng.random() < keep]
+
+
+def enclose(target, scale, how):
+    """The two pitches that lead into the pitch `target` as bebop players do: `how` 0 or 1, they enclose it, the
+    step of `scale` (12 pitch classes) over it then a semitone under it, or the step under it then a semitone over
+    it; 2 or 3, a double chromatic approach, two semitones down to it from over it, or up from under it."""
+    side = 1 if how % 2 == 0 else -1
+    if how < 2:
+        return [next(target + side * k for k in range(1, 13) if scale[(target + side * k) % 12]), target - side]
+    return [target + 2 * side, target + side]
 
 
 def settle(notes, low, high, near):
@@ -129,15 +140,61 @@ def fit(notes, scale):
     return fitted
 
 
-def vary(lick, bars, rng):
-    """`lick`, of `bars` bars, as a soloist plays a phrase again to develop it: as it was (over the chords that
-    follow, a sequence), a beat later, its first half only, or upside down from its first note."""
-    how = rng.randrange(4)
+def scaled(lick, factor):
+    """`lick`'s notes (beats from the bar line, beats it lasts, pitch) played `factor` times as slowly: 2, in half
+    time; 0.5, in double time. An upbeat that would begin more than UPBEAT beats before the bar line is left out."""
+    return [[at * factor, lasts * factor, pitch] for at, lasts, pitch in lick if at * factor >= -UPBEAT]
+
+
+def vary(lick, bars, rng, fastest=0):
+    """`lick`, of `bars` bars, as a soloist plays a phrase again to develop it: (its notes, the bars they last). As it
+    was (over the chords that follow, a sequence), a beat later, its first half only, upside down from its first
+    note, backwards (its pitches in the other order, on its rhythm), a tone higher or lower (the duo fits it to the
+    scale), twice as slow (when that keeps it within LONGEST bars) or twice as fast (when no two of its notes come
+    closer than `fastest` beats); otherwise as it was."""
+    how = rng.randrange(8)
     if how == 1 and lick[2][0] + 1 < 4 * bars:   # (three notes of it, at least, still in its bars)
-        return [[at + 1, lasts, pitch] for at, lasts, pitch in lick if at + 1 < 4 * bars]
+        return [[at + 1, lasts, pitch] for at, lasts, pitch in lick if at + 1 < 4 * bars], bars
     if how == 2:
-        return lick[:max((len(lick) + 1) // 2, 3)]
-    return [[at, lasts, 2 * lick[0][2] - pitch if how == 3 else pitch] for at, lasts, pitch in lick]
+        return lick[:max((len(lick) + 1) // 2, 3)], bars
+    if how == 4:
+        return [[at, lasts, pitch] for (at, lasts, _), (*_, pitch) in zip(lick, lick[::-1])], bars
+    if how == 5:
+        tone = rng.choice((-2, 2))
+        return [[at, lasts, pitch + tone] for at, lasts, pitch in lick], bars
+    if how == 6 and 2 * bars <= LONGEST:
+        return scaled(lick, 2), 2 * bars
+    if how == 7 and all(b[0] - a[0] > 2 * fastest - 1e-6 for a, b in zip(lick, lick[1:])):
+        return scaled(lick, 0.5), -(-bars // 2)
+    return [[at, lasts, 2 * lick[0][2] - pitch if how == 3 else pitch] for at, lasts, pitch in lick], bars
+
+
+PACES = ((1, ''), (0.5, 'double time'), (2, 'half time'))   # how a phrase may be played over chords nobody played
+                                                            # it over: as it was, over the same chords twice as long,
+                                                            # at twice its pace; or over them half as long, at half
+PACED = 0.15  # how often it quotes a phrase played over its chords at another pace than theirs, when there is one
+OVER = 0.15   # how often it hears the chords as a bebop soloist may, to play over them (superimposed), when it can
+
+
+def superimposed(under):
+    """`under`, the (root, kind) of each beat, as a bebop soloist may hear it to play over it: a dominant that
+    resolves, a fourth up, as the dominant a tritone away (its substitution: the altered scale); another, of a bar or
+    more, as its ii and itself, half each (a ii-V over its V). The same list when it has no dominant."""
+    runs = []
+    for chord in under:
+        if runs and runs[-1][0] == chord:
+            runs[-1][1] += 1
+        else:
+            runs.append([chord, 1])
+    over = []
+    for k, ((root, kind), beats) in enumerate(runs):
+        if kind == 'dom' and k + 1 < len(runs) and runs[k + 1][0][0] == (root + 5) % 12:
+            over += [((root + 6) % 12, 'dom')] * beats
+        elif kind == 'dom' and beats >= 4 and beats % 2 == 0:
+            over += [((root + 7) % 12, 'min')] * (beats // 2) + [(root, 'dom')] * (beats // 2)
+        else:
+            over += [(root, kind)] * beats
+    return over
 
 
 def quote(library, rng, chords, low, high, near, like=None, most=LONGEST, fastest=0, slow=False):
@@ -150,28 +207,55 @@ def quote(library, rng, chords, low, high, near, like=None, most=LONGEST, fastes
     from the pitch `near`, the last of its line, in the octave that keeps it from `low` to `high` (place). A phrase
     with two notes less than `fastest` beats apart is left out: a horn's run from a slower tune, a blur at this one's
     tempo. `slow`: over a ballad, a phrase from a solo played as slowly (SLOW), when there is one, as often as SAME.
-    Returns ("who · the tune", [(beats from the bar line, beats it lasts, pitch), ...], the bars it lasts), or None
-    when nothing was played over these chords."""
+    As often as PACED, and where nobody played over these chords, one played over them in double or half time
+    (PACES); as often as OVER, and where nobody played that either, one played over the chords it hears over them
+    (superimposed), as it was.
+    Returns ("who · the tune", [(beats from the bar line, beats it lasts, pitch), ...], the bars it lasts, whether it
+    is superimposed: outside these chords, as it was meant), or None when nothing was played over these chords."""
     under = [(root, kind_of(kind)) for root, kind in chords]
+    asked = (library, rng, low, high, near, like, most, fastest, slow)
+    found = _quote(under, PACES[:1], *asked)
+    if found is None or rng.random() < PACED:
+        found = _quote(under, PACES[1:], *asked) or found
+    over = superimposed(under)
+    if over != under and (found is None or rng.random() < OVER):
+        found = _quote(over, PACES[:1], *asked, True) or found
+    return found
+
+
+def _quote(under, paces, library, rng, low, high, near, like, most, fastest, slow, outside=False):
+    """quote(), over `under`, the (root, kind in bebop.DEGREES) of each beat, of the phrases played over them at
+    `paces` (PACES'): the phrase it found, `outside` or not, or None."""
     end = len(under) // 4 if most >= LONGEST else min(most, len(under) // 4)   # bars it plans over
 
     @functools.cache
     def played(first, bars):
-        licks = library['licks'].get(key_of(under[4 * first:4 * (first + bars)]), ()) if first + bars <= end else ()
-        return [lick for lick in licks if all(b[0] - a[0] > fastest - 1e-6 for a, b in zip(lick[1], lick[1][1:]))] \
-            if fastest else licks
+        """The phrases played over the bars from `first`, and how ('', or one of PACES)."""
+        chords = under[4 * first:4 * (first + bars)]
+        for factor, pace in paces if first + bars <= end else ():
+            source = [chord for chord in chords for _ in (0, 1)] if factor < 1 else chords[::2] if factor > 1 else chords
+            if bars / factor > LONGEST or bars / factor % 1 or factor > 1 and \
+                    [chord for chord in source for _ in (0, 1)] != chords:   # half time: each chord an even number of beats
+                continue
+            licks = [[player, scaled(notes, factor) if factor != 1 else notes]
+                     for player, notes in library['licks'].get(key_of(source), ())]
+            licks = [lick for lick in licks if all(b[0] - a[0] > fastest - 1e-6 for a, b in zip(lick[1], lick[1][1:]))]
+            if licks:
+                return licks, pace
+        return (), ''
 
     @functools.cache
     def phrases(first):
         """The fewest phrases that cover the bars from `first` on; a bar nobody played counts as one."""
         if first >= end:
             return 0
-        return 1 + min([phrases(first + bars) for bars in range(1, LONGEST + 1) if played(first, bars)] or [phrases(first + 1)])
+        return 1 + min([phrases(first + bars) for bars in range(1, LONGEST + 1) if played(first, bars)[0]] or
+                       [phrases(first + 1)])
 
-    found = sorted((phrases(bars), -bars) for bars in range(1, LONGEST + 1) if played(0, bars))
-    first = next((k for k, (_, bars) in enumerate(found) if rng.random() < LONGER * min(len(played(0, -bars)) / FEW, 1)), 0)
+    found = sorted((phrases(bars), -bars) for bars in range(1, LONGEST + 1) if played(0, bars)[0])
+    first = next((k for k, (_, bars) in enumerate(found) if rng.random() < LONGER * min(len(played(0, -bars)[0]) / FEW, 1)), 0)
     for _, bars in found[first:] + found[:first]:
-        licks = played(0, -bars)
+        licks, pace = played(0, -bars)
         theirs = [lick for lick in licks if library['players'][lick[0]][0] == like]
         slower = [lick for lick in licks if 0 < tempo(library, lick) <= SLOW] if slow else []
         for pool in ([slower] if slower and rng.random() < SAME else []) + \
@@ -180,5 +264,6 @@ def quote(library, rng, chords, low, high, near, like=None, most=LONGEST, fastes
                       for player, lick in rng.sample(pool, min(len(pool), DRAWN))]
             best = max((drawn for drawn in placed if drawn[0]), key=lambda drawn: drawn[0][0], default=None)
             if best:
-                return ' · '.join(library['players'][best[1]][:2]), best[0][1], -bars
+                how = [pace] * bool(pace) + ['superimposed'] * outside
+                return ' · '.join(library['players'][best[1]][:2] + how), best[0][1], -bars, outside
     return None

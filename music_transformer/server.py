@@ -159,9 +159,9 @@ def make_handler(player):
                         elif session.base is not None and session.ahead() < LOOKAHEAD:
                             begun = time.perf_counter()
                             sampled = session.play()
-                            if sampled:
-                                onset, duration, pitch, hand = sampled
-                                self.wfile.write(f"note {onset:.3f} {duration:.3f} {pitch} {hand}\n".encode())
+                            if sampled:   # and the notes its right hand plays with it (octaves, block chords...)
+                                for onset, duration, pitch, hand in [sampled] + session.with_it:
+                                    self.wfile.write(f"note {onset:.3f} {duration:.3f} {pitch} {hand}\n".encode())
                                 sampling.append(time.perf_counter() - begun)
                                 if since:
                                     answers.append(time.perf_counter() - since)

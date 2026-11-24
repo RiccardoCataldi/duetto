@@ -108,6 +108,9 @@ REACH = 1.0       # logit taken from a pitch for each semitone further from it t
 NEXT = 1.5        # logit added, on the note before it, to a step from it
 COLOUR = 2.0      # logit added, on a note a beat long or more, to the chord's third, seventh and tensions
 RISE = 12         # semitones its solo's register rises from where it begins to its height, at the top of its `arc`
+# a pianist's right hand: at its solo's height, its line in octaves or block chords (chart.texture), and now and then
+CRUSH = 0.25      # a note on the major third of a chord with a crushed note a semitone under it, struck with it
+CRUSHED = 0.04    # seconds: and let go at once
 
 # the knobs you can turn while you play (the piano roll shows them): default, lowest, highest, unit, what it does
 KNOBS = {
@@ -146,10 +149,15 @@ KNOBS = {
     'licks': (0.4, 0.0, 1.0, '', "how much of its solo is phrases of the great soloists, or yours, note for note, "
               "each over the chords it was played over: 0: none, its own lines only; at the top: one after another"),
     'pickup': (0.5, 0.0, 1.0, '', "how often, when one phrase it quotes follows another and there is room between "
-               "them, it leads into the next: by step, with a chromatic approach off the beat, or enclosing its first note"),
+               "them, it leads into the next: by step, with a chromatic approach off the beat, or enclosing its first "
+               "note; and how often a phrase of its own encloses the note it is going to, or approaches it by two "
+               "semitones"),
     'vary': (0.3, 0.0, 1.0, '', "how often, in place of a new phrase, it plays the one it quoted last, or your last, "
              "again over the chords that follow, as a soloist develops a phrase: as it was, a beat later, its first "
-             "half only, or upside down"),
+             "half only, upside down, backwards, a tone higher or lower, twice as slow or twice as fast"),
+    'own': (0.3, 0.0, 1.0, '', "how often, where it quotes nothing, its line is a phrase of its own: a soloist's "
+            "rhythm, its notes its own, on their way to a colour of the chord chosen before it sets out; 0: its free "
+            "lines only. Over a ballad, always"),
     'skips': (SKIPS, 0.0, 0.5, '', "how often its walking bass plays an eighth on the and of a beat, a skip note "
               "into the next, as a bassist does now and then: 0, quarters only"),
     'theme': (0.3, 0.0, 1.0, '', "how often, where a phrase of the tune's theme begins, its solo paraphrases it: as "
@@ -202,6 +210,8 @@ class DuoSession:
         self.leads = None              # session seconds of the phrase its own line is leading into
         self.aim = None                # for a note of a phrase of its own: ((the pitch it goes to, notes until it),
                                        # whether the ear rests on it)
+        self.with_it = []              # the notes its right hand plays with its note just played, unheard by the
+                                       # model (_with): (onset, duration, pitch, voice) as play() returns it
 
     def turn(self, **knobs):
         """Sets knobs (see KNOBS), kept within their range; they take effect from the model's next note."""
@@ -314,7 +324,7 @@ class DuoSession:
     def play(self):
         """Samples the model's next note: (onset, duration, pitch, voice) in session seconds; its voice is 'solo' (its
         line, or a phrase it quotes), 'chords' (what it comps, under you or under its own solo) or 'bass': each may
-        sound as an instrument of its own."""
+        sound as an instrument of its own. The notes its right hand plays with it are in `with_it`."""
         self._fit()
         now, last = self.now(), self._last_time()
         you_play = self.heard_at is not None and now - self.heard_at < PLAYING
@@ -445,7 +455,7 @@ class DuoSession:
             self.seq.append(token)
         if self._instrument(self.seq[-1]) == self.left:
             self._tie()
-        return self._played(solos or bool(quote))
+        return self._played(solos or bool(quote), solos)
 
     def _lead(self, quote, earliest):
         """When the next note it quotes, `quote`, is the first of a phrase and a silence longer than its `breath`
@@ -488,9 +498,9 @@ class DuoSession:
                     return max(tick, earliest), tick + self.grid
         return None
 
-    def _played(self, line=False):
+    def _played(self, line=False, solos=False):
         """The note just sampled, once it has joined what it has said; `line`: its right hand plays a line, not
-        chords."""
+        chords; `solos`: its solo, not your phrase it quotes while it comps (with_it: nothing under you)."""
         time_, duration, note = self.seq[-3:]
         onset, pitch = self._seconds(time_ - TIME_OFFSET), (note - NOTE_OFFSET) % MAX_PITCH
         if self._instrument(note) not in (self.left, self.comp):   # its walking bass and the chords under its solo
@@ -498,7 +508,27 @@ class DuoSession:
             self.spoken = self.spoken[-256:] + [onset]
         voice = 'bass' if self._instrument(note) == self.left else 'solo' if line and self._instrument(note) == self.me \
             else 'chords'
-        return onset, (duration - DUR_OFFSET) / TIME_RESOLUTION, pitch, voice
+        lasts = (duration - DUR_OFFSET) / TIME_RESOLUTION
+        self.with_it = self._with(onset, lasts, pitch) if voice == 'solo' and solos else []
+        return onset, lasts, pitch, voice
+
+    def _with(self, onset, lasts, pitch):
+        """The notes its right hand plays with `pitch`, a note of its solo at session seconds `onset` that lasts
+        `lasts` seconds; the model hears none of them. In octaves (chart.texture), the octave under it; in block
+        chords, that and, when it is a tone of the chord an eighth long or more, the chord's other tones between them,
+        close under it: locked hands. Playing a line, as often as CRUSH when it is the major third of a chord, a
+        crushed note a semitone under it, struck with it and let go at once, as a blues pianist bends the third."""
+        texture, (root, _, tones) = chart.texture(self, onset), self.listener.harmony(onset)
+        eighth = lasts * TIME_RESOLUTION >= self._shortest()   # or longer
+        if texture != 'line' and pitch - 12 >= UNDER[0]:
+            under = [pitch - 12]
+            if texture == 'block' and pitch % 12 in tones and eighth:
+                under += [p for p in range(pitch - 11, pitch) if p % 12 in tones]
+            return [(onset, lasts, p, 'solo') for p in under]
+        if texture == 'line' and eighth and pitch % 12 == (root + 4) % 12 and pitch % 12 in tones and \
+                random.Random(self.varied * 83 + round(onset * 100)).random() < CRUSH:   # the same however often asked
+            return [(onset, CRUSHED, pitch - 1, 'solo')]
+        return []
 
     def _tick(self, seconds):
         return round(seconds * TIME_RESOLUTION) - self.base
@@ -634,7 +664,10 @@ class DuoSession:
 
     def _allowed(self, at, way):
         """The notes its line may play at `at` playing the changes in `way` (listener.palette): those of the way; for
-        a way of few notes (NARROW), the chord's whole scale too, and theirs (a blue note) as well."""
+        a way of few notes (NARROW), the chord's whole scale too, and theirs (a blue note) as well; side-slipping,
+        where it slips (chart.slip), the chord's scale a semitone up or down."""
+        if way == 'sideslip' and chart.slip(self, at):
+            return np.roll(self.listener.chord_scale(at), chart.slip(self, at))
         if way not in NARROW:
             return way
         return np.maximum(self.listener.chord_scale(at), self.listener.palette(at, way))
@@ -698,7 +731,9 @@ class DuoSession:
         your last phrase there as often as `echo` is of its top, or any of them; the others a great soloist's, by
         the one it last quoted when they played these chords too, and the one that goes on best from where its line
         left off (licks.place). As often as `vary` says, instead, it plays again the phrase it quoted last, or your
-        last, whatever the chords, to develop it (licks.vary). While it comps (`solos` False) it quotes you only,
+        last, whatever the chords, to develop it (licks.vary). A soloist's phrase may be one played over these chords
+        in double or half time, or over the chords a soloist hears over these (superimposed): that one is not fitted
+        to their scale. While it comps (`solos` False) it quotes you only,
         where its line would be. A soloist's is one whose notes are FASTEST apart or more at this tempo, and each
         note of it ends before the next (DETACHED): a piano's line, not a horn's. It plays it as it was played, in
         the key of the tune, swung as the tune is, its notes on the beat within the scale of these chords unless its
@@ -706,8 +741,10 @@ class DuoSession:
         leads into it from the phrase before (_pickup).
         Where a phrase of the tune's theme begins, as often as `theme` says, it paraphrases it instead
         (licks.paraphrase), in the octave its line is in.
-        Over a ballad the bars it quotes nothing are no less planned: a phrase of its own on a rhythm borrowed from
-        a soloist's (_rhythm), its notes its own and its last an arrival chosen before it sets out (_arrival); or,
+        Where it quotes nothing, as often as `own` says, a phrase of its own on a rhythm borrowed from a soloist's
+        (_rhythm), its notes its own and its last an arrival chosen before it sets out (_arrival), as often as
+        `pickup` says enclosed or approached by two semitones (_enclose); elsewhere its free line, as its way says.
+        Over a ballad the bars it quotes nothing are no less planned: a phrase of its own, always; or,
         while the phrase before still rings and for the silence after it, nothing: a rest. Each phrase is sung
         (_sung): laid back, legato, its last note held; a slow solo's Licks come first, and none faster than
         triplets."""
@@ -735,24 +772,27 @@ class DuoSession:
             bars, notes = theme[0], licks.paraphrase(
                 licks.settle(theme[1], low, high, theme[1][0][2] if states else near), chance, states)
         elif self.licks > 0 and owed and not rests and not states:
+            fastest = max(FASTEST / beat, TRIPLET if chart.ballad(self) else 0)   # over a ballad, no faster than triplets
             if solos and self.motif and self.motif[2] <= ahead and rng.random() < self.vary:
-                placed = licks.place(licks.vary(*self.motif[1:], rng), chords[0][0], low, high, near)
-                found = placed and (self.motif[0], placed[1], self.motif[2])
+                varied, lasting = licks.vary(*self.motif[1:], rng, fastest)
+                placed = licks.place(varied, chords[0][0], low, high, near)
+                found = placed and (self.motif[0], placed[1], lasting, False)
             elif self.yours and rng.random() < self.recall / EXACT:
                 # echo is how closely its answer follows your phrase: here, how often it is that phrase itself
                 last = rng.random() < self.echo / KNOBS['echo'][2]
                 found = quote({'players': [['you']], 'licks': {
                     under: mine[-1:] if last else mine for under, mine in self.yours.items()}})
-            if not found and solos:   # over a ballad, only the phrases of theirs no faster than triplets
-                found = quote(licks.DATA, max(FASTEST / beat, TRIPLET if chart.ballad(self) else 0))
+            if not found and solos:
+                found = quote(licks.DATA, fastest)
                 if found:   # the phrase it may develop next, free of its key as a Lick is
                     self.motif = (found[0], [[at_, lasts, pitch - chords[0][0]] for at_, lasts, pitch in found[1]],
                                   found[2])
         if found:
             bars, notes = found[2], found[1]
-            if 2 * self.out_of_key >= OUT_OF_KEY:   # inside: over these chords, not those it was played over
+            # inside: over these chords, not those it was played over; superimposed, as it was meant
+            if 2 * self.out_of_key >= OUT_OF_KEY and not found[3]:
                 notes = licks.fit(notes, lambda at_: self.listener.chord_scale(start + (at_ + 0.01) * beat))
-        elif ballad and not rests and not theme and not states:
+        elif solos and not rests and not theme and not states and (ballad or chance.random() < self.own):
             bars, notes = self._rhythm(start, chance)
         phrase = []
         if notes:
@@ -768,14 +808,16 @@ class DuoSession:
                 phrase = self._pickup(before[-1], bar * chart.BEATS + found[1][0][0], phrase[0][1]) + phrase
             if ballad:
                 phrase = self._sung(phrase, chance, states)
-                if phrase and phrase[-1][1] is None:   # where its own phrase is going
-                    phrase[-1] = (phrase[-1][0], self._arrival(phrase[-1][0], near, low, high, chance), phrase[-1][2])
             else:   # detached: no note sounds into the next
                 gap = lambda k: next((round((after - phrase[k][0]) * TIME_RESOLUTION * DETACHED)
                                       for after, *_ in phrase[k + 1:] if after > phrase[k][0] + 0.01), MAX_DUR)
                 # nor is one a blip: a horn's shortest notes, as transcribed, are too short for a piano's
                 phrase = [(seconds, pitch, max(min(max(lasts, self._shortest()), gap(k)), 1))
                           for k, (seconds, pitch, lasts) in enumerate(phrase)]
+            if phrase and phrase[-1][1] is None:   # where its own phrase is going, and how it gets there
+                phrase[-1] = (phrase[-1][0], self._arrival(phrase[-1][0], near, low, high, chance), phrase[-1][2])
+                if chance.random() < self.pickup:
+                    phrase = self._enclose(phrase, low, high, chance)
             # a note of its own: the next one given it is on its way to, and whether it lasts a beat
             given = [k for k, note in enumerate(phrase) if note[1] is not None]
             phrase = [note if note[1] is not None else
@@ -787,14 +829,30 @@ class DuoSession:
             self.quoted = [self.quoted[0] + (found[2] if found else 0), self.quoted[1] + bars]
 
     def _rhythm(self, start, chance):
-        """The rhythm of a phrase of its own over a ballad, from session seconds `start`: (the bars it lasts,
-        [(beats from the bar line, beats it lasts, None), ...]). A soloist's, borrowed (licks.rhythm): sparse where
-        its solo begins, and thinned, with more notes a bar and all of them as it builds (`arc`). As often as `vary`
-        says, the rhythm of its last phrase again: its own motif, on other notes."""
-        built = self.arc * chart.build(self, start)
+        """The rhythm of a phrase of its own, from session seconds `start`: (the bars it lasts, [(beats from the bar
+        line, beats it lasts, None), ...]). A soloist's, borrowed (licks.rhythm): sparse where its solo begins, with
+        more notes a bar as it builds (`arc`); over a ballad a ballad's, no faster than triplets, and thinned, all of
+        its notes only at its height; otherwise none faster than FASTEST at this tempo. As often as `vary` says, the
+        rhythm of its last phrase again: its own motif, on other notes."""
+        built, ballad = self.arc * chart.build(self, start), chart.ballad(self)
         if not self.rhythm or chance.random() >= self.vary:
-            self.rhythm = licks.rhythm(chance, SPARSE + (DENSE - SPARSE) * built, TRIPLET, STAYS + (1 - STAYS) * built)
+            self.rhythm = licks.rhythm(chance, SPARSE + (DENSE - SPARSE) * built,
+                                       TRIPLET if ballad else FASTEST * self.pace / 60,
+                                       STAYS + (1 - STAYS) * built if ballad else 1, ballad)
         return self.rhythm[0], [(at, lasts, None) for at, lasts in self.rhythm[1]]
+
+    def _enclose(self, phrase, low, high, chance):
+        """`phrase`, [(seconds, pitch, ticks it lasts), ...], a phrase of its own whose last note, its arrival, is
+        chosen: the two notes before it, when they come within a beat of it, enclose it or approach it by two
+        semitones (licks.enclose), from `low` to `high`; otherwise as it was."""
+        if len(phrase) < 3 or phrase[-1][0] - phrase[-3][0] > 60 / self.pace + 0.05:
+            return phrase
+        target = phrase[-1][1]
+        pitches = licks.enclose(target, self.listener.chord_scale(phrase[-1][0] + 0.01), chance.randrange(4))
+        if not all(low <= pitch <= high for pitch in pitches):
+            return phrase
+        return phrase[:-3] + [(seconds, pitch, lasts) for (seconds, _, lasts), pitch in zip(phrase[-3:-1], pitches)] \
+            + phrase[-1:]
 
     def _sung(self, phrase, chance, written=False):
         """`phrase`, [(seconds, pitch, ticks it lasts), ...], as a ballad is played: none of it before the phrase
@@ -988,9 +1046,9 @@ class DuoSession:
         """Logits added to its pitches when it solos, for the chromatic approach: off the beat, a key a
         semitone from a tone of the chord may be played though it is outside the scale; the note after it is that
         tone; and on the beat the chord's tones are its targets."""
-        bias = torch.zeros(MAX_PITCH)
-        tones, scale = self.listener.harmony(at)[2], self.listener.palette(at, way) if way not in NARROW \
-            else self._allowed(at, way)
+        bias, allowed = torch.zeros(MAX_PITCH), self._allowed(at, way)
+        tones = self.listener.harmony(at)[2]
+        scale = self.listener.palette(at, allowed) if isinstance(allowed, str) else allowed
         chord = torch.tensor([p % 12 in tones for p in range(MAX_PITCH)])
         last = (line[-1][1] - NOTE_OFFSET) % MAX_PITCH if line else None
         if last is not None and not scale[last % 12] and last % 12 not in tones:   # it approached: now it lands

@@ -59,6 +59,14 @@ class DuoTest(unittest.TestCase):
         chords = sorted(m[1] for m, channel in self.out.messages if channel == main.sound.CHORDS and m[0] == 0x90)
         self.assertEqual(chords, [60, 64])                    # its chords are not melodic: both
 
+    def test_a_crushed_note_of_its_solo_is_let_go_at_once_the_note_it_bends_into_rings_on(self):
+        for line in ("note 2.000 0.040 63 solo\n", "note 2.000 0.500 64 solo\n"):
+            self.duo.receive(line)
+        self.duo.tick(102.0)
+        self.duo.tick(102.05)
+        offs = [m[1] for m, channel in self.out.messages if channel == main.sound.AI and m[0] == 0x80]
+        self.assertEqual(offs, [63])
+
     def test_your_key_goes_to_the_model_at_once_with_a_guessed_duration(self):
         self.duo.note_on(60, 90, 101.5)
         self.assertEqual(self.sent, [f"on 1.500 {main.GUESS_S:.3f} 60 90\n"])
