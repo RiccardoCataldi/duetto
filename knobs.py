@@ -217,7 +217,7 @@ class Mind:
         saved = self._saved('knobs')
         for name, knob in knobs.items():
             if name in saved:
-                knob.value = saved[name]
+                knob.value = min(max(saved[name], knob.low), knob.high)   # the server's range may have shrunk (fewer charts)
                 self.send(knob, keep=False)
         for macro in self.macros:
             for name, anchors in self.turns[macro.name].items():

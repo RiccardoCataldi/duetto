@@ -1,7 +1,7 @@
 title: Black Orpheus
 key: A minor
 bpm: 120
-Am7 | Bm7b5 E7b9 | Am7 | Bm7b5 E7b9 | Am7 | Dm7 G7 | Cmaj7 | % |
-Fmaj7 | Bm7b5 E7b9 | Am7 | Bm7b5 E7b9 | Am7 | Bm7b5 E7b9 | Em7b5 | A7b9 |
-Dm7 | G7 | Cmaj7 | Fmaj7 | Bm7b5 | E7b9 | Am7 | Bm7b5 E7b9 |
-Am7 | Dm7 G7 | Cmaj7 | Fmaj7 | Bm7b5 | E7b9 | Am7 | Bm7b5 E7b9 |
+Am7 | Bm7b5 E7b9 | Am7 | Bm7b5 E7b9 | Am7 | Dm7 G7 | Cmaj7 | C#dim7 A7b9 |
+Dm7 | G7 | C6 | Fmaj7 | Bm7b5 | E7b9 | Am7 | Bm7b5 E7b9 |
+Am7 | Bm7b5 E7b9 | Am7 | Bm7b5 E7b9 | Em7b5 | A7b9 | Dm7 | % |
+Dm7 Dm7/C | Bm7b5 E7b9 | Am7 Am7/G | Fmaj7 | Bm7b5 | E7b9 | Am7 | Bm7b5 E7b9 |
